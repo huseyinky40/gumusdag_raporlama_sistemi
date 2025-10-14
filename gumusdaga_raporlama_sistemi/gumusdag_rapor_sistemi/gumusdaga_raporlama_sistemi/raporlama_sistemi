@@ -90,6 +90,7 @@ class LoginDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Giriş Yap")
         self.setModal(True)
+        self.setMinimumSize(420, 320)
 
         layout = QVBoxLayout(self)
         logo_label = QLabel()
