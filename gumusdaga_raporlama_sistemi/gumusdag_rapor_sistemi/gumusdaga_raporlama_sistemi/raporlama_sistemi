@@ -440,28 +440,10 @@ class EventsTab(QWidget):
         sum_rows = 0
         splits = []
         for i in range(self.dt_tbl_split.rowCount()):
-            dept_item = self.dt_tbl_split.item(i, 0)
-            reason_item = self.dt_tbl_split.item(i, 1)
-            mins_item = self.dt_tbl_split.item(i, 2)
-            note_item = self.dt_tbl_split.item(i, 3)
-
-            dept = dept_item.text().strip() if dept_item else ""
-            reason = reason_item.text().strip() if reason_item else ""
-            normalized_reason, normalized_department, swapped = normalize_reason_department(reason, dept)
-            if swapped:
-                if dept_item:
-                    dept_item.setText(normalized_department)
-                else:
-                    self.dt_tbl_split.setItem(i, 0, QTableWidgetItem(normalized_department))
-                if reason_item:
-                    reason_item.setText(normalized_reason)
-                else:
-                    self.dt_tbl_split.setItem(i, 1, QTableWidgetItem(normalized_reason))
-
-            reason = normalized_reason
-            dept = normalized_department
-            mins_text = mins_item.text() if mins_item else "0"
-            note = note_item.text() if note_item else ""
+            dept = self.dt_tbl_split.item(i, 0).text() if self.dt_tbl_split.item(i, 0) else ""
+            reason = self.dt_tbl_split.item(i, 1).text() if self.dt_tbl_split.item(i, 1) else ""
+            mins_text = self.dt_tbl_split.item(i, 2).text() if self.dt_tbl_split.item(i, 2) else "0"
+            note = self.dt_tbl_split.item(i, 3).text() if self.dt_tbl_split.item(i, 3) else ""
             try:
                 mins = int(mins_text)
             except ValueError:
