@@ -37,6 +37,52 @@ DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin"
 
 
+def normalize_reason_department(reason_value, department_value):
+    """Return normalized (reason, department, swapped?) tuple for split entries."""
+    reason_text = (reason_value or "").strip()
+    department_text = (department_value or "").strip()
+
+    reason_is_department = reason_text in DEPARTMENTS
+    department_is_department = department_text in DEPARTMENTS
+    reason_is_reason = reason_text in REASONS
+    department_is_reason = department_text in REASONS
+
+    should_swap = False
+
+    if reason_is_department and not department_is_department:
+        should_swap = True
+    elif department_is_reason and not reason_is_reason:
+        should_swap = True
+    elif reason_is_department and department_is_reason:
+        should_swap = True
+
+    if should_swap:
+        return department_text, reason_text, True
+
+    return reason_text, department_text, False
+
+
+def normalize_existing_downtime_splits(conn):
+    rows = conn.execute(
+        "SELECT id, reason, department FROM downtime_splits"
+    ).fetchall()
+
+    updates = []
+    for row in rows:
+        normalized_reason, normalized_department, swapped = normalize_reason_department(
+            row["reason"], row["department"]
+        )
+        if swapped:
+            updates.append((normalized_reason, normalized_department, row["id"]))
+
+    if updates:
+        conn.executemany(
+            "UPDATE downtime_splits SET reason=?, department=? WHERE id=?",
+            updates,
+        )
+        conn.commit()
+
+
 class LoginDialog(QDialog):
     def __init__(self):
         super().__init__()
@@ -140,6 +186,7 @@ def init_db():
         """
     )
     conn.commit()
+    normalize_existing_downtime_splits(conn)
     conn.close()
 
 
@@ -250,7 +297,7 @@ class EventsTab(QWidget):
         dt_layout.addLayout(row1)
 
         self.dt_tbl_split = QTableWidget(0, 4)
-        self.dt_tbl_split.setHorizontalHeaderLabels(["Neden", "Departman", "Dakika", "Not"])
+        self.dt_tbl_split.setHorizontalHeaderLabels(["Departman", "Neden", "Dakika", "Not"])
         self.dt_tbl_split.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.dt_tbl_split.setMinimumHeight(160)
         dt_layout.addWidget(self.dt_tbl_split)
@@ -372,8 +419,8 @@ class EventsTab(QWidget):
     def add_split_row(self):
         i = self.dt_tbl_split.rowCount()
         self.dt_tbl_split.insertRow(i)
-        self.dt_tbl_split.setItem(i, 0, QTableWidgetItem(REASONS[0]))
-        self.dt_tbl_split.setItem(i, 1, QTableWidgetItem(DEPARTMENTS[0]))
+        self.dt_tbl_split.setItem(i, 0, QTableWidgetItem(DEPARTMENTS[0]))
+        self.dt_tbl_split.setItem(i, 1, QTableWidgetItem(REASONS[0]))
         self.dt_tbl_split.setItem(i, 2, QTableWidgetItem("0"))
         self.dt_tbl_split.setItem(i, 3, QTableWidgetItem(""))
 
@@ -393,10 +440,28 @@ class EventsTab(QWidget):
         sum_rows = 0
         splits = []
         for i in range(self.dt_tbl_split.rowCount()):
-            reason = self.dt_tbl_split.item(i, 0).text() if self.dt_tbl_split.item(i, 0) else ""
-            dept = self.dt_tbl_split.item(i, 1).text() if self.dt_tbl_split.item(i, 1) else ""
-            mins_text = self.dt_tbl_split.item(i, 2).text() if self.dt_tbl_split.item(i, 2) else "0"
-            note = self.dt_tbl_split.item(i, 3).text() if self.dt_tbl_split.item(i, 3) else ""
+            dept_item = self.dt_tbl_split.item(i, 0)
+            reason_item = self.dt_tbl_split.item(i, 1)
+            mins_item = self.dt_tbl_split.item(i, 2)
+            note_item = self.dt_tbl_split.item(i, 3)
+
+            dept = dept_item.text().strip() if dept_item else ""
+            reason = reason_item.text().strip() if reason_item else ""
+            normalized_reason, normalized_department, swapped = normalize_reason_department(reason, dept)
+            if swapped:
+                if dept_item:
+                    dept_item.setText(normalized_department)
+                else:
+                    self.dt_tbl_split.setItem(i, 0, QTableWidgetItem(normalized_department))
+                if reason_item:
+                    reason_item.setText(normalized_reason)
+                else:
+                    self.dt_tbl_split.setItem(i, 1, QTableWidgetItem(normalized_reason))
+
+            reason = normalized_reason
+            dept = normalized_department
+            mins_text = mins_item.text() if mins_item else "0"
+            note = note_item.text() if note_item else ""
             try:
                 mins = int(mins_text)
             except ValueError:
