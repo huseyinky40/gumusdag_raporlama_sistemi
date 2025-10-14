@@ -18,7 +18,7 @@ import sqlite3
 from datetime import datetime, date
 
 from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QDateEdit, QSpinBox, QLineEdit, QTextEdit,
@@ -35,6 +35,8 @@ REASONS = [
 
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin"
+
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gumusdag_logo.jpeg")
 
 
 def normalize_reason_department(reason_value, department_value):
@@ -90,6 +92,13 @@ class LoginDialog(QDialog):
         self.setModal(True)
 
         layout = QVBoxLayout(self)
+        logo_label = QLabel()
+        logo_label.setAlignment(Qt.AlignCenter)
+        if os.path.exists(LOGO_PATH):
+            pixmap = QPixmap(LOGO_PATH)
+            if not pixmap.isNull():
+                logo_label.setPixmap(pixmap.scaledToWidth(200, Qt.SmoothTransformation))
+        layout.addWidget(logo_label)
         form_layout = QFormLayout()
         layout.addLayout(form_layout)
 
