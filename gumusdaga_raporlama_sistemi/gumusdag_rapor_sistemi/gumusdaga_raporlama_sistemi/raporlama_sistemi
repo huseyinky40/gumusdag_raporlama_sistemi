@@ -1,0 +1,722 @@
+# app_fabrika_desktop.py
+# -----------------------------------------------------------
+# Masaüstü (web tabanlı değil) prototip
+# PySide6 (Qt) + SQLite ile tek dosya uygulama
+# Çalıştırmadan önce `pip install -r requirements.txt` komutunu uygulayarak
+# PySide6 bağımlılığının kurulduğundan emin olun.
+# Özellikler (MVP):
+#  - 6 üretim bandı için Günlük Üretim kaydı
+#  - Duraklama kaydı (toplam dakika + neden/Departman kırılımı tablo ile)
+#  - Olay/Issue kaydı (departman, neden, yorum)
+#  - Geçmiş sekmesinde son kayıtları listeleme + temel filtreler
+# Not: Bu bir başlangıç iskeletidir; raporlama ve ileri filtreleme basit tutuldu.
+# -----------------------------------------------------------
+
+import os
+import sys
+import sqlite3
+from datetime import datetime, date
+
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QComboBox, QDateEdit, QSpinBox, QLineEdit, QTextEdit,
+    QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
+    QGroupBox
+)
+
+DB_FILE = "fabrika.db"
+LINES = [f"Bant {i}" for i in range(1, 7)]
+DEPARTMENTS = ["A - Üretim", "B - Bakım", "C - Kalite", "D - Lojistik"]
+REASONS = [
+    "A - Kalıp Hatası", "B - Makine Arızası", "C - Malzeme Eksikliği", "D - Operatör Kaynaklı"
+]
+
+# --------------------- DB Helpers -------------------------
+
+def get_conn():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS productions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line TEXT NOT NULL,
+            date TEXT NOT NULL,
+            expected INTEGER NOT NULL,
+            actual INTEGER NOT NULL,
+            performance_pct REAL NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS downtimes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line TEXT NOT NULL,
+            date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            total_minutes INTEGER NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS downtime_splits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            downtime_id INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            department TEXT NOT NULL,
+            minutes INTEGER NOT NULL,
+            note TEXT,
+            FOREIGN KEY (downtime_id) REFERENCES downtimes(id) ON DELETE CASCADE
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            line TEXT NOT NULL,
+            date TEXT NOT NULL,
+            department TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            duration_min INTEGER NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+# --------------------- UI Widgets -------------------------
+class ProductionTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+
+        form = QHBoxLayout()
+        self.cmb_line = QComboBox(); self.cmb_line.addItems(LINES)
+        self.date_edit = QDateEdit(); self.date_edit.setCalendarPopup(True); self.date_edit.setDate(QDate.currentDate())
+        self.spn_expected = QSpinBox(); self.spn_expected.setRange(0, 10_000); self.spn_expected.setValue(100)
+        self.spn_actual = QSpinBox(); self.spn_actual.setRange(0, 10_000); self.spn_actual.setValue(90)
+        form.addWidget(QLabel("Bant:")); form.addWidget(self.cmb_line)
+        form.addWidget(QLabel("Tarih:")); form.addWidget(self.date_edit)
+        form.addWidget(QLabel("Beklenen:")); form.addWidget(self.spn_expected)
+        form.addWidget(QLabel("Gerçekleşen:")); form.addWidget(self.spn_actual)
+
+        self.txt_comment = QLineEdit(); self.txt_comment.setPlaceholderText("Yorum (opsiyonel)")
+        btn_save = QPushButton("Kaydet"); btn_save.clicked.connect(self.save_record)
+
+        layout.addLayout(form)
+        layout.addWidget(self.txt_comment)
+        layout.addWidget(btn_save)
+
+        # Liste
+        self.tbl = QTableWidget(0, 7)
+        self.tbl.setHorizontalHeaderLabels(["id","Bant","Tarih","Beklenen","Gerçekleşen","Performans %","Yorum"])
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.tbl)
+        self.refresh_table()
+
+    def save_record(self):
+        line = self.cmb_line.currentText()
+        date_str = self.date_edit.date().toString("yyyy-MM-dd")
+        expected = self.spn_expected.value()
+        actual = self.spn_actual.value()
+        perf = 0.0 if expected == 0 else round((actual/expected)*100, 2)
+        comment = self.txt_comment.text().strip()
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO productions(line,date,expected,actual,performance_pct,comment,created_at) VALUES(?,?,?,?,?,?,?)",
+            (line, date_str, expected, actual, perf, comment, datetime.utcnow().isoformat())
+        )
+        conn.commit(); conn.close()
+        self.refresh_table()
+        QMessageBox.information(self, "Kayıt", "Üretim kaydı eklendi")
+
+    def refresh_table(self):
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("SELECT id,line,date,expected,actual,performance_pct,comment FROM productions ORDER BY id DESC LIMIT 20")
+        rows = cur.fetchall(); conn.close()
+        self.tbl.setRowCount(0)
+        for r in rows:
+            i = self.tbl.rowCount(); self.tbl.insertRow(i)
+            self.tbl.setItem(i,0,QTableWidgetItem(str(r["id"])) )
+            self.tbl.setItem(i,1,QTableWidgetItem(r["line"]))
+            self.tbl.setItem(i,2,QTableWidgetItem(r["date"]))
+            self.tbl.setItem(i,3,QTableWidgetItem(str(r["expected"])) )
+            self.tbl.setItem(i,4,QTableWidgetItem(str(r["actual"])) )
+            self.tbl.setItem(i,5,QTableWidgetItem(str(r["performance_pct"])) )
+            self.tbl.setItem(i,6,QTableWidgetItem(r["comment"] if r["comment"] else ""))
+
+
+class EventsTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+
+        general_row = QHBoxLayout()
+        self.cmb_type = QComboBox(); self.cmb_type.addItems(["Duraklama", "Olay/Issue"])
+        self.cmb_type.currentTextChanged.connect(self.switch_event_type)
+        self.ev_cmb_line = QComboBox(); self.ev_cmb_line.addItems(LINES)
+        self.ev_date = QDateEdit(); self.ev_date.setCalendarPopup(True); self.ev_date.setDate(QDate.currentDate())
+        general_row.addWidget(QLabel("Tür:")); general_row.addWidget(self.cmb_type)
+        general_row.addWidget(QLabel("Bant:")); general_row.addWidget(self.ev_cmb_line)
+        general_row.addWidget(QLabel("Tarih:")); general_row.addWidget(self.ev_date)
+        general_row.addStretch()
+        layout.addLayout(general_row)
+
+        # Duraklama bölümü
+        self.dt_group = QGroupBox("Duraklama Detayları")
+        dt_layout = QVBoxLayout(self.dt_group)
+
+        row1 = QHBoxLayout()
+        self.dt_start_time = QLineEdit(); self.dt_start_time.setPlaceholderText("Başlangıç (HH:MM)")
+        self.dt_total = QSpinBox(); self.dt_total.setRange(1, 10_000); self.dt_total.setValue(60)
+        row1.addWidget(QLabel("Başlangıç:")); row1.addWidget(self.dt_start_time)
+        row1.addWidget(QLabel("Toplam (dk):")); row1.addWidget(self.dt_total)
+        dt_layout.addLayout(row1)
+
+        self.dt_tbl_split = QTableWidget(0, 4)
+        self.dt_tbl_split.setHorizontalHeaderLabels(["Neden", "Departman", "Dakika", "Not"])
+        self.dt_tbl_split.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        dt_layout.addWidget(self.dt_tbl_split)
+
+        split_buttons = QHBoxLayout()
+        btn_add = QPushButton("Satır Ekle"); btn_add.clicked.connect(self.add_split_row)
+        btn_del = QPushButton("Seçili Satırı Sil"); btn_del.clicked.connect(self.del_split_row)
+        split_buttons.addWidget(btn_add); split_buttons.addWidget(btn_del); split_buttons.addStretch()
+        dt_layout.addLayout(split_buttons)
+
+        self.dt_comment = QTextEdit(); self.dt_comment.setPlaceholderText("Genel Not (opsiyonel)")
+        dt_layout.addWidget(self.dt_comment)
+
+        # Olay bölümü
+        self.issue_group = QGroupBox("Olay/Issue Detayları")
+        issue_layout = QVBoxLayout(self.issue_group)
+
+        issue_row = QHBoxLayout()
+        self.issue_department = QComboBox(); self.issue_department.addItems(DEPARTMENTS)
+        self.issue_reason = QComboBox(); self.issue_reason.addItems(REASONS)
+        self.issue_duration = QSpinBox(); self.issue_duration.setRange(1, 10_000); self.issue_duration.setValue(30)
+        issue_row.addWidget(QLabel("Departman:")); issue_row.addWidget(self.issue_department)
+        issue_row.addWidget(QLabel("Neden:")); issue_row.addWidget(self.issue_reason)
+        issue_row.addWidget(QLabel("Süre (dk):")); issue_row.addWidget(self.issue_duration)
+        issue_layout.addLayout(issue_row)
+
+        self.issue_comment = QTextEdit(); self.issue_comment.setPlaceholderText("Detay/Not (opsiyonel)")
+        issue_layout.addWidget(self.issue_comment)
+
+        layout.addWidget(self.dt_group)
+        layout.addWidget(self.issue_group)
+
+        self.btn_save = QPushButton()
+        self.btn_save.clicked.connect(self.save_event)
+        layout.addWidget(self.btn_save)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Liste Filtresi:"))
+        self.filter_type = QComboBox(); self.filter_type.addItems(["Hepsi", "Duraklama", "Olay/Issue"])
+        self.filter_type.currentIndexChanged.connect(self.refresh_table)
+        filter_row.addWidget(self.filter_type)
+        self.filter_line = QComboBox(); self.filter_line.addItem("Hepsi"); self.filter_line.addItems(LINES)
+        self.filter_line.currentIndexChanged.connect(self.refresh_table)
+        filter_row.addWidget(self.filter_line)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
+        self.tbl = QTableWidget(0, 0)
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.tbl)
+
+        self.lbl_summary = QLabel("")
+        layout.addWidget(self.lbl_summary)
+
+        summary_group = QGroupBox("Dağılım Özeti")
+        summary_layout = QVBoxLayout(summary_group)
+        summary_controls = QHBoxLayout()
+        self.summary_start = QDateEdit(); self.summary_start.setCalendarPopup(True); self.summary_start.setDate(QDate.currentDate())
+        self.summary_end = QDateEdit(); self.summary_end.setCalendarPopup(True); self.summary_end.setDate(QDate.currentDate())
+        btn_summary = QPushButton("Özeti Hesapla"); btn_summary.clicked.connect(self.generate_summary)
+        summary_controls.addWidget(QLabel("Başlangıç:")); summary_controls.addWidget(self.summary_start)
+        summary_controls.addWidget(QLabel("Bitiş:")); summary_controls.addWidget(self.summary_end)
+        summary_controls.addStretch(); summary_controls.addWidget(btn_summary)
+        summary_layout.addLayout(summary_controls)
+        self.txt_summary = QTextEdit(); self.txt_summary.setReadOnly(True)
+        self.txt_summary.setPlaceholderText("Seçilen tarih aralığında dağılım özetleri burada listelenecek.")
+        summary_layout.addWidget(self.txt_summary)
+        layout.addWidget(summary_group)
+
+        report_group = QGroupBox("Günlük Duraklama/Olay Raporu")
+        report_layout = QVBoxLayout(report_group)
+        report_controls = QHBoxLayout()
+        self.report_date = QDateEdit(); self.report_date.setCalendarPopup(True); self.report_date.setDate(QDate.currentDate())
+        self.report_date.dateChanged.connect(lambda *_: self.generate_report())
+        btn_update_report = QPushButton("Raporu Güncelle"); btn_update_report.clicked.connect(self.generate_report)
+        self.btn_mail = QPushButton("Mail ile Gönder")
+        self.btn_mail.clicked.connect(self.mail_placeholder)
+        report_controls.addWidget(QLabel("Tarih:"))
+        report_controls.addWidget(self.report_date)
+        report_controls.addWidget(btn_update_report)
+        report_controls.addStretch(); report_controls.addWidget(self.btn_mail)
+        report_layout.addLayout(report_controls)
+        self.txt_report = QTextEdit(); self.txt_report.setReadOnly(True)
+        self.txt_report.setPlaceholderText("Seçilen gün için duraklama ve olay özeti burada görünecek.")
+        report_layout.addWidget(self.txt_report)
+        layout.addWidget(report_group)
+
+        self.switch_event_type(self.cmb_type.currentText())
+        self.add_split_row()
+        self.refresh_table()
+        self.generate_report()
+        self.generate_summary()
+
+    def switch_event_type(self, typ):
+        is_downtime = typ == "Duraklama"
+        self.dt_group.setVisible(is_downtime)
+        self.issue_group.setVisible(not is_downtime)
+        self.btn_save.setText("Duraklamayı Kaydet" if is_downtime else "Olayı Kaydet")
+
+    def add_split_row(self):
+        i = self.dt_tbl_split.rowCount()
+        self.dt_tbl_split.insertRow(i)
+        self.dt_tbl_split.setItem(i, 0, QTableWidgetItem(REASONS[0]))
+        self.dt_tbl_split.setItem(i, 1, QTableWidgetItem(DEPARTMENTS[0]))
+        self.dt_tbl_split.setItem(i, 2, QTableWidgetItem("0"))
+        self.dt_tbl_split.setItem(i, 3, QTableWidgetItem(""))
+
+    def del_split_row(self):
+        row = self.dt_tbl_split.currentRow()
+        if row >= 0:
+            self.dt_tbl_split.removeRow(row)
+
+    def save_event(self):
+        if self.cmb_type.currentText() == "Duraklama":
+            self.save_downtime()
+        else:
+            self.save_issue()
+
+    def save_downtime(self):
+        total = self.dt_total.value()
+        sum_rows = 0
+        splits = []
+        for i in range(self.dt_tbl_split.rowCount()):
+            reason = self.dt_tbl_split.item(i, 0).text() if self.dt_tbl_split.item(i, 0) else ""
+            dept = self.dt_tbl_split.item(i, 1).text() if self.dt_tbl_split.item(i, 1) else ""
+            mins_text = self.dt_tbl_split.item(i, 2).text() if self.dt_tbl_split.item(i, 2) else "0"
+            note = self.dt_tbl_split.item(i, 3).text() if self.dt_tbl_split.item(i, 3) else ""
+            try:
+                mins = int(mins_text)
+            except ValueError:
+                QMessageBox.warning(self, "Hata", f"Geçersiz dakika: satır {i+1}")
+                return
+            sum_rows += mins
+            splits.append((reason, dept, mins, note))
+        if sum_rows != total:
+            QMessageBox.warning(self, "Doğrulama", f"Toplam ({total}) ile satırların toplamı ({sum_rows}) eşit değil")
+            return
+
+        line = self.ev_cmb_line.currentText()
+        date_str = self.ev_date.date().toString("yyyy-MM-dd")
+        start = self.dt_start_time.text().strip() or "00:00"
+        comment = self.dt_comment.toPlainText().strip()
+
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO downtimes(line,date,start_time,total_minutes,comment,created_at) VALUES(?,?,?,?,?,?)",
+            (line, date_str, start, total, comment, datetime.utcnow().isoformat())
+        )
+        dt_id = cur.lastrowid
+        cur.executemany(
+            "INSERT INTO downtime_splits(downtime_id,reason,department,minutes,note) VALUES(?,?,?,?,?)",
+            [(dt_id, r, d, m, n) for (r, d, m, n) in splits]
+        )
+        conn.commit(); conn.close()
+        self.report_date.setDate(self.ev_date.date())
+        self.summary_start.setDate(self.ev_date.date())
+        self.summary_end.setDate(self.ev_date.date())
+        self.refresh_table()
+        self.generate_report()
+        self.generate_summary()
+        self.dt_start_time.clear()
+        self.dt_tbl_split.setRowCount(0)
+        self.add_split_row()
+        self.dt_comment.clear()
+        QMessageBox.information(self, "Kayıt", "Duraklama kaydedildi")
+
+    def save_issue(self):
+        duration = self.issue_duration.value()
+        if duration <= 0:
+            QMessageBox.warning(self, "Doğrulama", "Süre 0'dan büyük olmalıdır.")
+            return
+
+        line = self.ev_cmb_line.currentText()
+        date_str = self.ev_date.date().toString("yyyy-MM-dd")
+        department = self.issue_department.currentText()
+        reason = self.issue_reason.currentText()
+        comment = self.issue_comment.toPlainText().strip()
+
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO issues(line,date,department,reason,duration_min,comment,created_at) VALUES(?,?,?,?,?,?,?)",
+            (line, date_str, department, reason, duration, comment, datetime.utcnow().isoformat())
+        )
+        conn.commit(); conn.close()
+        self.report_date.setDate(self.ev_date.date())
+        self.summary_start.setDate(self.ev_date.date())
+        self.summary_end.setDate(self.ev_date.date())
+        self.refresh_table()
+        self.generate_report()
+        self.generate_summary()
+        self.issue_duration.setValue(30)
+        self.issue_comment.clear()
+        QMessageBox.information(self, "Kayıt", "Olay kaydedildi")
+
+    def refresh_table(self):
+        conn = get_conn(); cur = conn.cursor()
+        line_filter = self.filter_line.currentText()
+        type_filter = self.filter_type.currentText()
+
+        entries = []
+        total_dt = 0
+        total_issue = 0
+
+        if type_filter in ("Hepsi", "Duraklama"):
+            sql = "SELECT id,line,date,start_time,total_minutes,comment,created_at FROM downtimes"
+            params = []
+            if line_filter != "Hepsi":
+                sql += " WHERE line=?"
+                params.append(line_filter)
+            sql += " ORDER BY date DESC, created_at DESC LIMIT 50"
+            cur.execute(sql, params)
+            downtimes = cur.fetchall()
+            for dt in downtimes:
+                total_dt += dt["total_minutes"]
+                splits = conn.execute(
+                    "SELECT department,reason,minutes FROM downtime_splits WHERE downtime_id=?",
+                    (dt["id"],)
+                ).fetchall()
+                split_text = "; ".join(
+                    f"{sp['department']} - {sp['reason']} ({sp['minutes']} dk)" for sp in splits
+                )
+                entries.append([
+                    "Duraklama",
+                    str(dt["id"]),
+                    dt["line"],
+                    dt["date"],
+                    dt["start_time"],
+                    str(dt["total_minutes"]),
+                    split_text,
+                    dt["comment"] or "",
+                    dt["created_at"],
+                ])
+
+        if type_filter in ("Hepsi", "Olay/Issue"):
+            sql = "SELECT id,line,date,department,reason,duration_min,comment,created_at FROM issues"
+            params = []
+            if line_filter != "Hepsi":
+                sql += " WHERE line=?"
+                params.append(line_filter)
+            sql += " ORDER BY date DESC, created_at DESC LIMIT 50"
+            cur.execute(sql, params)
+            issues = cur.fetchall()
+            for issue in issues:
+                total_issue += issue["duration_min"]
+                entries.append([
+                    "Olay/Issue",
+                    str(issue["id"]),
+                    issue["line"],
+                    issue["date"],
+                    "-",
+                    str(issue["duration_min"]),
+                    f"{issue['department']} - {issue['reason']}",
+                    issue["comment"] or "",
+                    issue["created_at"],
+                ])
+
+        conn.close()
+
+        headers = [
+            "Tür",
+            "id",
+            "Bant",
+            "Tarih",
+            "Başlangıç",
+            "Süre (dk)",
+            "Detay",
+            "Not",
+            "Kaydedildi",
+        ]
+        self.tbl.setColumnCount(len(headers))
+        self.tbl.setHorizontalHeaderLabels(headers)
+        self.tbl.setRowCount(0)
+
+        for entry in entries:
+            i = self.tbl.rowCount(); self.tbl.insertRow(i)
+            for j, value in enumerate(entry):
+                self.tbl.setItem(i, j, QTableWidgetItem(value))
+
+        self.tbl.resizeRowsToContents()
+        summary_parts = []
+        if type_filter in ("Hepsi", "Duraklama"):
+            summary_parts.append(f"Duraklama: {total_dt} dk")
+        if type_filter in ("Hepsi", "Olay/Issue"):
+            summary_parts.append(f"Olay: {total_issue} dk")
+        if summary_parts:
+            self.lbl_summary.setText("Gösterilen süreler → " + ", ".join(summary_parts))
+        else:
+            self.lbl_summary.setText("")
+
+    def generate_report(self):
+        date_str = self.report_date.date().toString("yyyy-MM-dd")
+        conn = get_conn(); cur = conn.cursor()
+
+        cur.execute(
+            "SELECT id,line,start_time,total_minutes,comment FROM downtimes WHERE date=? ORDER BY line",
+            (date_str,)
+        )
+        downtimes = cur.fetchall()
+
+        cur.execute(
+            "SELECT id,line,department,reason,duration_min,comment FROM issues WHERE date=? ORDER BY line",
+            (date_str,)
+        )
+        issues = cur.fetchall()
+
+        lines = [f"Rapor Tarihi: {date_str}", ""]
+
+        total_dt = sum(dt["total_minutes"] for dt in downtimes)
+        total_issue = sum(issue["duration_min"] for issue in issues)
+        if downtimes or issues:
+            lines.append(
+                f"Genel Etki Süresi: {total_dt + total_issue} dk (Duraklama: {total_dt} dk, Olay: {total_issue} dk)"
+            )
+            lines.append("")
+
+        if downtimes:
+            lines.append("Duraklamalar:")
+            for dt in downtimes:
+                entry = f"- {dt['line']} | Başlangıç: {dt['start_time']} | Toplam: {dt['total_minutes']} dk"
+                if dt["comment"]:
+                    entry += f" | Not: {dt['comment']}"
+                split_rows = conn.execute(
+                    "SELECT reason,department,minutes,note FROM downtime_splits WHERE downtime_id=?",
+                    (dt["id"],)
+                ).fetchall()
+                if split_rows:
+                    details = []
+                    for sp in split_rows:
+                        detail = f"{sp['department']} - {sp['reason']} ({sp['minutes']} dk)"
+                        if sp["note"]:
+                            detail += f" Not: {sp['note']}"
+                        details.append(detail)
+                    entry += "\n    Dağılım: " + "; ".join(details)
+                lines.append(entry)
+            lines.append(f"Toplam Duraklama Süresi: {total_dt} dk")
+        else:
+            lines.append("Duraklama kaydı bulunmuyor.")
+
+        if issues:
+            lines.append("")
+            lines.append("Olay/Issue Kayıtları:")
+            for issue in issues:
+                entry = (
+                    f"- {issue['line']} | Departman: {issue['department']} | Neden: {issue['reason']} | "
+                    f"Süre: {issue['duration_min']} dk"
+                )
+                if issue["comment"]:
+                    entry += f" | Not: {issue['comment']}"
+                lines.append(entry)
+            lines.append(f"Toplam Olay Süresi: {total_issue} dk")
+        else:
+            lines.append("Olay kaydı bulunmuyor.")
+
+        conn.close()
+        self.txt_report.setPlainText("\n".join(lines))
+
+    def generate_summary(self):
+        start_date = self.summary_start.date().toString("yyyy-MM-dd")
+        end_date = self.summary_end.date().toString("yyyy-MM-dd")
+        if self.summary_start.date() > self.summary_end.date():
+            QMessageBox.warning(self, "Tarih Aralığı", "Başlangıç tarihi bitişten büyük olamaz.")
+            return
+
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT department, reason, SUM(minutes) AS total
+            FROM downtime_splits
+            JOIN downtimes ON downtimes.id = downtime_splits.downtime_id
+            WHERE downtimes.date BETWEEN ? AND ?
+            GROUP BY department, reason
+            ORDER BY total DESC
+            """,
+            (start_date, end_date)
+        )
+        dt_rows = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT department, reason, SUM(duration_min) AS total
+            FROM issues
+            WHERE date BETWEEN ? AND ?
+            GROUP BY department, reason
+            ORDER BY total DESC
+            """,
+            (start_date, end_date)
+        )
+        issue_rows = cur.fetchall()
+        conn.close()
+
+        total_dt = sum(row["total"] for row in dt_rows)
+        total_issue = sum(row["total"] for row in issue_rows)
+
+        if not dt_rows and not issue_rows:
+            self.txt_summary.setPlainText("Seçilen aralıkta kayıt bulunamadı.")
+            return
+
+        lines = [
+            f"Tarih Aralığı: {start_date} - {end_date}",
+            f"Toplam Süre: {total_dt + total_issue} dk (Duraklama: {total_dt} dk, Olay: {total_issue} dk)",
+            "",
+        ]
+
+        if dt_rows:
+            lines.append("Duraklama Dağılımı:")
+            for row in dt_rows:
+                share = 0 if total_dt == 0 else round((row["total"] / total_dt) * 100, 1)
+                lines.append(f"- {row['department']} / {row['reason']}: {row['total']} dk (%{share})")
+        else:
+            lines.append("Duraklama dağılımı bulunamadı.")
+
+        lines.append("")
+
+        if issue_rows:
+            lines.append("Olay/Issue Dağılımı:")
+            for row in issue_rows:
+                share = 0 if total_issue == 0 else round((row["total"] / total_issue) * 100, 1)
+                lines.append(f"- {row['department']} / {row['reason']}: {row['total']} dk (%{share})")
+        else:
+            lines.append("Olay dağılımı bulunamadı.")
+
+        self.txt_summary.setPlainText("\n".join(lines))
+
+    def mail_placeholder(self):
+        QMessageBox.information(
+            self,
+            "Mail Gönderimi",
+            "Mail gönderme planlama özelliği yakında eklenecek."
+        )
+            
+
+
+class HistoryTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        # Basit filtreler: Bant ve kayıt türü
+        row = QHBoxLayout()
+        self.cmb_line = QComboBox(); self.cmb_line.addItem("Hepsi"); self.cmb_line.addItems(LINES)
+        self.cmb_type = QComboBox(); self.cmb_type.addItems(["Üretim","Duraklama","Olay/Issue"])
+        btn_refresh = QPushButton("Yenile"); btn_refresh.clicked.connect(self.refresh)
+        row.addWidget(QLabel("Bant:")); row.addWidget(self.cmb_line)
+        row.addWidget(QLabel("Tür:")); row.addWidget(self.cmb_type)
+        row.addWidget(btn_refresh); row.addStretch()
+        layout.addLayout(row)
+
+        self.tbl = QTableWidget(0, 0)
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.tbl)
+        self.refresh()
+
+    def refresh(self):
+        typ = self.cmb_type.currentText()
+        line = self.cmb_line.currentText()
+        conn = get_conn(); cur = conn.cursor()
+        if typ == "Üretim":
+            sql = "SELECT id,line,date,expected,actual,performance_pct,comment,created_at FROM productions"
+            order_clause = " ORDER BY id DESC LIMIT 100"
+        elif typ == "Duraklama":
+            sql = "SELECT id,line,date,start_time,total_minutes,comment,created_at FROM downtimes"
+            order_clause = " ORDER BY id DESC LIMIT 100"
+        else:
+            sql = "SELECT id,line,date,department,reason,duration_min,comment,created_at FROM issues"
+            order_clause = " ORDER BY id DESC LIMIT 100"
+
+        params = []
+        if line != "Hepsi":
+            sql += " WHERE line=?"
+            params.append(line)
+        sql += order_clause
+        cur.execute(sql, params)
+        rows = cur.fetchall(); conn.close()
+
+        # Başlıklar
+        headers = list(rows[0].keys()) if rows else []
+        if not headers:
+            if typ == "Üretim":
+                headers = ["id","line","date","expected","actual","performance_pct","comment","created_at"]
+            elif typ == "Duraklama":
+                headers = ["id","line","date","start_time","total_minutes","comment","created_at"]
+            else:
+                headers = ["id","line","date","department","reason","duration_min","comment","created_at"]
+        self.tbl.setColumnCount(len(headers))
+        self.tbl.setHorizontalHeaderLabels(headers)
+        self.tbl.setRowCount(0)
+        for r in rows:
+            i = self.tbl.rowCount(); self.tbl.insertRow(i)
+            row_data = dict(r)
+            for j, h in enumerate(headers):
+                value = row_data.get(h, "")
+                if value is None:
+                    value = ""
+                self.tbl.setItem(i, j, QTableWidgetItem(str(value)))
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Fabrika İzleme • Desktop (PySide6)")
+        self.resize(1100, 700)
+        tabs = QTabWidget()
+        tabs.addTab(ProductionTab(), "Günlük Üretim")
+        tabs.addTab(EventsTab(), "Duraklama / Olay")
+        tabs.addTab(HistoryTab(), "Geçmiş")
+        self.setCentralWidget(tabs)
+
+        # Menü → Çıkış ve Hakkında
+        menu = self.menuBar().addMenu("Dosya")
+        act_exit = QAction("Çıkış", self); act_exit.triggered.connect(self.close)
+        menu.addAction(act_exit)
+        helpm = self.menuBar().addMenu("Yardım")
+        about = QAction("Hakkında", self); about.triggered.connect(self.show_about)
+        helpm.addAction(about)
+
+    def show_about(self):
+        QMessageBox.information(self, "Hakkında", "Fabrika İzleme Desktop MVP\nPySide6 + SQLite\n© 2025")
+
+
+def main():
+    init_db()
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
