@@ -37,6 +37,52 @@ DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin"
 
 
+def normalize_reason_department(reason_value, department_value):
+    """Return normalized (reason, department, swapped?) tuple for split entries."""
+    reason_text = (reason_value or "").strip()
+    department_text = (department_value or "").strip()
+
+    reason_is_department = reason_text in DEPARTMENTS
+    department_is_department = department_text in DEPARTMENTS
+    reason_is_reason = reason_text in REASONS
+    department_is_reason = department_text in REASONS
+
+    should_swap = False
+
+    if reason_is_department and not department_is_department:
+        should_swap = True
+    elif department_is_reason and not reason_is_reason:
+        should_swap = True
+    elif reason_is_department and department_is_reason:
+        should_swap = True
+
+    if should_swap:
+        return department_text, reason_text, True
+
+    return reason_text, department_text, False
+
+
+def normalize_existing_downtime_splits(conn):
+    rows = conn.execute(
+        "SELECT id, reason, department FROM downtime_splits"
+    ).fetchall()
+
+    updates = []
+    for row in rows:
+        normalized_reason, normalized_department, swapped = normalize_reason_department(
+            row["reason"], row["department"]
+        )
+        if swapped:
+            updates.append((normalized_reason, normalized_department, row["id"]))
+
+    if updates:
+        conn.executemany(
+            "UPDATE downtime_splits SET reason=?, department=? WHERE id=?",
+            updates,
+        )
+        conn.commit()
+
+
 class LoginDialog(QDialog):
     def __init__(self):
         super().__init__()
@@ -140,6 +186,7 @@ def init_db():
         """
     )
     conn.commit()
+    normalize_existing_downtime_splits(conn)
     conn.close()
 
 
