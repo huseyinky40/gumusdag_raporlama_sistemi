@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QDateEdit, QSpinBox, QLineEdit, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QGroupBox, QScrollArea
+    QGroupBox, QScrollArea, QDialog, QFormLayout, QDialogButtonBox
 )
 
 DB_FILE = "fabrika.db"
@@ -32,6 +32,47 @@ DEPARTMENTS = ["A - Üretim", "B - Bakım", "C - Kalite", "D - Lojistik"]
 REASONS = [
     "A - Kalıp Hatası", "B - Makine Arızası", "C - Malzeme Eksikliği", "D - Operatör Kaynaklı"
 ]
+
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "admin"
+
+
+class LoginDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Giriş Yap")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+        layout.addLayout(form_layout)
+
+        self.username_edit = QLineEdit()
+        self.username_edit.setPlaceholderText("Kullanıcı adı")
+        self.username_edit.setText(DEFAULT_USERNAME)
+        form_layout.addRow("Kullanıcı Adı", self.username_edit)
+
+        self.password_edit = QLineEdit()
+        self.password_edit.setPlaceholderText("Şifre")
+        self.password_edit.setEchoMode(QLineEdit.Password)
+        form_layout.addRow("Şifre", self.password_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.handle_login)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def handle_login(self):
+        username = self.username_edit.text().strip()
+        password = self.password_edit.text()
+
+        if username == DEFAULT_USERNAME and password == DEFAULT_PASSWORD:
+            self.accept()
+            return
+
+        QMessageBox.warning(self, "Giriş Başarısız", "Kullanıcı adı veya şifre hatalı.")
+        self.password_edit.clear()
+        self.password_edit.setFocus()
 
 # --------------------- DB Helpers -------------------------
 
@@ -748,8 +789,13 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    init_db()
     app = QApplication(sys.argv)
+
+    login = LoginDialog()
+    if login.exec() != QDialog.Accepted:
+        return
+
+    init_db()
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
