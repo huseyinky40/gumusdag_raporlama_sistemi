@@ -90,7 +90,7 @@ class LoginDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Giriş Yap")
         self.setModal(True)
-        self.setMinimumSize(420, 320)
+        self.setMinimumSize(520, 420)
 
         layout = QVBoxLayout(self)
         logo_label = QLabel()
@@ -98,19 +98,32 @@ class LoginDialog(QDialog):
         if os.path.exists(LOGO_PATH):
             pixmap = QPixmap(LOGO_PATH)
             if not pixmap.isNull():
-                logo_label.setPixmap(pixmap.scaledToWidth(200, Qt.SmoothTransformation))
+                logo_label.setPixmap(
+                    pixmap.scaled(
+                        280,
+                        280,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                )
         layout.addWidget(logo_label)
         form_layout = QFormLayout()
+        form_layout.setSpacing(20)
+        form_layout.setLabelAlignment(Qt.AlignLeft)
         layout.addLayout(form_layout)
 
         self.username_edit = QLineEdit()
         self.username_edit.setPlaceholderText("Kullanıcı adı")
         self.username_edit.setText(DEFAULT_USERNAME)
+        self.username_edit.setMinimumHeight(44)
+        self.username_edit.setStyleSheet("font-size: 16px; padding: 8px 12px;")
         form_layout.addRow("Kullanıcı Adı", self.username_edit)
 
         self.password_edit = QLineEdit()
         self.password_edit.setPlaceholderText("Şifre")
         self.password_edit.setEchoMode(QLineEdit.Password)
+        self.password_edit.setMinimumHeight(44)
+        self.password_edit.setStyleSheet("font-size: 16px; padding: 8px 12px;")
         form_layout.addRow("Şifre", self.password_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
