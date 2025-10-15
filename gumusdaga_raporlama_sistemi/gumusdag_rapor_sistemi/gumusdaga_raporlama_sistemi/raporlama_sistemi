@@ -582,25 +582,13 @@ class ProductionTab(QWidget):
             return
 
         id_item = self.production_tbl.item(row, 0)
-        line_item = self.production_tbl.item(row, 1)
         date_item = self.production_tbl.item(row, 2)
         record_id_text = id_item.text().strip() if id_item else ""
-        line_text = line_item.text().strip() if line_item else ""
-        date_text = date_item.text().strip() if date_item else ""
-
         if not record_id_text:
             QMessageBox.warning(
                 self,
                 "Eksik Bilgi",
                 "Seçilen kaydın kimlik bilgisi bulunamadı.",
-            )
-            return
-
-        if not line_text or not date_text:
-            QMessageBox.warning(
-                self,
-                "Eksik Bilgi",
-                "Seçilen kayıt için bant veya tarih bilgisi eksik.",
             )
             return
 
@@ -617,7 +605,7 @@ class ProductionTab(QWidget):
         confirm = QMessageBox.question(
             self,
             "Üretimi Sil",
-            f"{line_text} - {date_text} tarihli üretim ve bağlı kayıtlar silinecek. Emin misiniz?",
+            "Seçilen üretim kaydını silmek istediğinize emin misiniz?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -625,93 +613,29 @@ class ProductionTab(QWidget):
             return
 
         conn = get_conn()
-        deleted_production = 0
-        deleted_downtimes = 0
-        deleted_issues = 0
-        try:
-            cur = conn.cursor()
-            existing = cur.execute(
-                "SELECT line, date FROM productions WHERE id=?",
-                (record_id,),
-            ).fetchone()
-            if not existing:
-                QMessageBox.warning(
-                    self,
-                    "Bulunamadı",
-                    "Seçilen üretim kaydı veritabanında bulunamadı.",
-                )
-                return
+        cur = conn.cursor()
+        cur.execute("DELETE FROM productions WHERE id=?", (record_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
 
-            line_db = existing["line"]
-            date_db = existing["date"]
-            line_text = line_db
-            date_text = date_db
-
-            conn.execute("BEGIN")
-
-            downtime_ids = [
-                row["id"]
-                for row in cur.execute(
-                    "SELECT id FROM downtimes WHERE line=? AND date=?",
-                    (line_db, date_db),
-                ).fetchall()
-            ]
-            if downtime_ids:
-                cur.executemany(
-                    "DELETE FROM downtime_splits WHERE downtime_id=?",
-                    [(dt_id,) for dt_id in downtime_ids],
-                )
-            deleted_downtimes = cur.execute(
-                "DELETE FROM downtimes WHERE line=? AND date=?",
-                (line_db, date_db),
-            ).rowcount
-            deleted_issues = cur.execute(
-                "DELETE FROM issues WHERE line=? AND date=?",
-                (line_db, date_db),
-            ).rowcount
-            deleted_production = cur.execute(
-                "DELETE FROM productions WHERE id=?",
-                (record_id,),
-            ).rowcount
-            if deleted_production == 0:
-                if conn.in_transaction:
-                    conn.rollback()
-                QMessageBox.warning(
-                    self,
-                    "Bulunamadı",
-                    "Seçilen üretim kaydı veritabanında bulunamadı.",
-                )
-                return
-
-            conn.commit()
-        except sqlite3.Error as exc:
-            if conn.in_transaction:
-                conn.rollback()
-            QMessageBox.critical(
+        if not deleted:
+            QMessageBox.warning(
                 self,
-                "Veritabanı Hatası",
-                f"Kayıtlar silinirken bir hata oluştu:\n{exc}",
+                "Bulunamadı",
+                "Seçilen üretim kaydı veritabanında bulunamadı.",
             )
             return
-        finally:
-            conn.close()
 
+        selected_date = date_item.text().strip() if date_item else ""
         self.refresh_production_table()
-        self.refresh_event_table()
-        if self.events_summary_start.date() <= self.events_summary_end.date():
-            self.generate_event_summary()
 
-        if date_text:
+        if selected_date:
             report_date = self.events_report_date.date().toString("yyyy-MM-dd")
-            if date_text == report_date:
+            if selected_date == report_date:
                 self.generate_event_report()
 
-        info_parts = ["Üretim kaydı silindi."]
-        if deleted_downtimes:
-            info_parts.append(f"{deleted_downtimes} duraklama kaydı kaldırıldı.")
-        if deleted_issues:
-            info_parts.append(f"{deleted_issues} olay kaydı kaldırıldı.")
-        QMessageBox.information(self, "Silindi", " ".join(info_parts))
+        QMessageBox.information(self, "Silindi", "Üretim kaydı silindi.")
 
     def refresh_production_table(self):
         line = self.cmb_line.currentText()
