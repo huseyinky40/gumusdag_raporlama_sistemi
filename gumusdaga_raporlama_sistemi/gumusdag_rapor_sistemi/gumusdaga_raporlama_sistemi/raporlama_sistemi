@@ -816,7 +816,10 @@ class ProductionTab(QWidget):
             idx = self.events_tbl.rowCount()
             self.events_tbl.insertRow(idx)
             for col, value in enumerate(entry):
-                self.events_tbl.setItem(idx, col, QTableWidgetItem(value))
+                text = "" if value is None else str(value)
+                item = QTableWidgetItem(text)
+                item.setToolTip(text)
+                self.events_tbl.setItem(idx, col, item)
 
         self.events_tbl.resizeRowsToContents()
         summary_parts = []
