@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QDateEdit, QSpinBox, QLineEdit, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QGroupBox, QScrollArea, QDialog, QFormLayout, QDialogButtonBox
+    QGroupBox, QScrollArea, QDialog, QFormLayout, QDialogButtonBox,
+    QPlainTextEdit,
 )
 
 DB_FILE = "fabrika.db"
@@ -276,7 +277,25 @@ class ProductionTab(QWidget):
         self.production_tbl.setTextElideMode(Qt.ElideRight)
         self.production_tbl.verticalHeader().setDefaultSectionSize(44)
         self.production_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.production_tbl.cellClicked.connect(self.on_production_cell_clicked)
         prod_layout.addWidget(self.production_tbl)
+
+        self.production_detail_box = QGroupBox("Detay Önizleme")
+        detail_layout = QVBoxLayout(self.production_detail_box)
+        detail_layout.setSpacing(8)
+        detail_layout.setContentsMargins(12, 12, 12, 12)
+        self.production_detail_title = QLabel()
+        self.production_detail_title.setStyleSheet("font-weight: 600;")
+        detail_layout.addWidget(self.production_detail_title)
+        self.production_detail_view = QPlainTextEdit()
+        self.production_detail_view.setReadOnly(True)
+        self.production_detail_view.setPlaceholderText(
+            "Duraklama, olay veya yorum detayını görmek için tabloda ilgili hücreyi seçin."
+        )
+        self.production_detail_view.setMinimumHeight(140)
+        detail_layout.addWidget(self.production_detail_view)
+        prod_layout.addWidget(self.production_detail_box)
+        self.clear_production_detail_preview()
 
         content_layout.addWidget(production_group)
 
@@ -561,6 +580,31 @@ class ProductionTab(QWidget):
 
         conn.close()
         self.production_tbl.viewport().update()
+        self.clear_production_detail_preview()
+
+    def clear_production_detail_preview(self):
+        self.production_detail_title.setText("Detay Seçiniz")
+        self.production_detail_view.clear()
+
+    def on_production_cell_clicked(self, row, column):
+        if column not in (8, 9, 10):
+            self.clear_production_detail_preview()
+            return
+
+        item = self.production_tbl.item(row, column)
+        if not item:
+            self.clear_production_detail_preview()
+            return
+
+        text = item.text().strip()
+        if not text:
+            self.clear_production_detail_preview()
+            return
+
+        header_item = self.production_tbl.horizontalHeaderItem(column)
+        header_text = header_item.text() if header_item else "Detay"
+        self.production_detail_title.setText(header_text)
+        self.production_detail_view.setPlainText(text)
 
     def _fetch_downtime_summary(self, conn, line, date_str):
         cur = conn.cursor()
