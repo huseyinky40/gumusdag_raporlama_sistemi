@@ -7,7 +7,6 @@
 # Özellikler (MVP):
 #  - 6 üretim bandı için Günlük Üretim kaydı
 #  - Duraklama kaydı (toplam dakika + neden/Departman kırılımı tablo ile)
-#  - Olay/Issue kaydı (departman, neden, yorum)
 #  - Geçmiş sekmesinde son kayıtları listeleme + temel filtreler
 # Not: Bu bir başlangıç iskeletidir; raporlama ve ileri filtreleme basit tutuldu.
 # -----------------------------------------------------------
@@ -217,20 +216,6 @@ def init_db():
         )
         """
     )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS issues (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            line TEXT NOT NULL,
-            date TEXT NOT NULL,
-            department TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            duration_min INTEGER NOT NULL,
-            comment TEXT,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
     conn.commit()
     normalize_existing_downtime_splits(conn)
     conn.close()
@@ -322,7 +307,7 @@ class ProductionTab(QWidget):
         self.production_detail_view = QPlainTextEdit()
         self.production_detail_view.setReadOnly(True)
         self.production_detail_view.setPlaceholderText(
-            "Duraklama, olay veya yorum detayını görmek için tabloda ilgili hücreyi seçin."
+            "Duraklama veya yorum detayını görmek için tabloda ilgili hücreyi seçin."
         )
         self.production_detail_view.setMinimumHeight(140)
         detail_layout.addWidget(self.production_detail_view)
@@ -333,17 +318,12 @@ class ProductionTab(QWidget):
 
         general_row = QHBoxLayout()
         general_row.setSpacing(12)
-        self.cmb_type = QComboBox()
-        self.cmb_type.addItems(["Duraklama", "Olay/Issue"])
-        self.cmb_type.currentTextChanged.connect(self.switch_event_type)
         self.ev_cmb_line = QComboBox()
         self.ev_cmb_line.addItems(LINES)
         self.ev_cmb_line.currentTextChanged.connect(self.on_event_line_changed)
         self.ev_date = QDateEdit()
         self.ev_date.setCalendarPopup(True)
         self.ev_date.setDate(QDate.currentDate())
-        general_row.addWidget(QLabel("Tür:"))
-        general_row.addWidget(self.cmb_type)
         general_row.addWidget(QLabel("Bant (eşlenik):"))
         general_row.addWidget(self.ev_cmb_line)
         general_row.addWidget(QLabel("Tarih:"))
@@ -391,47 +371,15 @@ class ProductionTab(QWidget):
         self.dt_comment.setMinimumHeight(80)
         dt_layout.addWidget(self.dt_comment)
 
-        self.issue_group = QGroupBox("Olay/Issue Detayları")
-        issue_layout = QVBoxLayout(self.issue_group)
-        issue_layout.setSpacing(12)
-        issue_layout.setContentsMargins(12, 12, 12, 12)
-
-        issue_row = QHBoxLayout()
-        issue_row.setSpacing(12)
-        self.issue_department = QComboBox()
-        self.issue_department.addItems(DEPARTMENTS)
-        self.issue_reason = QComboBox()
-        self.issue_reason.addItems(REASONS)
-        self.issue_duration = QSpinBox()
-        self.issue_duration.setRange(1, 10_000)
-        self.issue_duration.setValue(30)
-        issue_row.addWidget(QLabel("Departman:"))
-        issue_row.addWidget(self.issue_department)
-        issue_row.addWidget(QLabel("Neden:"))
-        issue_row.addWidget(self.issue_reason)
-        issue_row.addWidget(QLabel("Süre (dk):"))
-        issue_row.addWidget(self.issue_duration)
-        issue_layout.addLayout(issue_row)
-
-        self.issue_comment = QTextEdit()
-        self.issue_comment.setPlaceholderText("Detay/Not (opsiyonel)")
-        self.issue_comment.setMinimumHeight(80)
-        issue_layout.addWidget(self.issue_comment)
-
         content_layout.addWidget(self.dt_group)
-        content_layout.addWidget(self.issue_group)
 
-        self.btn_save_event = QPushButton()
-        self.btn_save_event.clicked.connect(self.save_event)
+        self.btn_save_event = QPushButton("Duraklamayı Kaydet")
+        self.btn_save_event.clicked.connect(self.save_downtime)
         content_layout.addWidget(self.btn_save_event)
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(12)
         filter_row.addWidget(QLabel("Liste Filtresi:"))
-        self.event_filter_type = QComboBox()
-        self.event_filter_type.addItems(["Hepsi", "Duraklama", "Olay/Issue"])
-        self.event_filter_type.currentIndexChanged.connect(self.refresh_event_table)
-        filter_row.addWidget(self.event_filter_type)
         self.event_filter_line = QComboBox()
         self.event_filter_line.addItem("Hepsi")
         self.event_filter_line.addItems(LINES)
@@ -477,7 +425,7 @@ class ProductionTab(QWidget):
         summary_layout.addWidget(self.events_txt_summary)
         content_layout.addWidget(summary_group)
 
-        report_group = QGroupBox("Günlük Üretim/Duraklama/Olay Raporu")
+        report_group = QGroupBox("Günlük Üretim/Duraklama Raporu")
         report_layout = QVBoxLayout(report_group)
         report_layout.setSpacing(12)
         report_layout.setContentsMargins(12, 12, 12, 12)
@@ -506,9 +454,7 @@ class ProductionTab(QWidget):
 
         content_layout.addStretch()
 
-        self.event_forms_available = False
         self.update_event_line_options()
-        self.switch_event_type(self.cmb_type.currentText())
         self.add_split_row()
         self.refresh_production_table()
         self.refresh_event_table()
@@ -642,11 +588,6 @@ class ProductionTab(QWidget):
                         downtime_ids,
                     )
 
-                cur.execute(
-                    "DELETE FROM issues WHERE line=? AND date=?",
-                    (selected_line, selected_date),
-                )
-
             conn.commit()
         finally:
             conn.close()
@@ -675,7 +616,7 @@ class ProductionTab(QWidget):
         QMessageBox.information(
             self,
             "Silindi",
-            "Üretim kaydı ve ilgili duraklama/olay kayıtları silindi.",
+            "Üretim kaydı ve ilgili duraklama kayıtları silindi.",
         )
 
     def refresh_production_table(self):
@@ -696,9 +637,7 @@ class ProductionTab(QWidget):
             "Gerçekleşen",
             "Performans %",
             "Duraklama Süresi (dk)",
-            "Olay Süresi (dk)",
             "Duraklama Detayı",
-            "Olay Detayı",
             "Yorum",
         ]
         self.production_tbl.setColumnCount(len(headers))
@@ -707,7 +646,6 @@ class ProductionTab(QWidget):
 
         for row in rows:
             downtime_total, downtime_details = self._fetch_downtime_summary(conn, row["line"], row["date"])
-            issue_total, issue_details = self._fetch_issue_summary(conn, row["line"], row["date"])
             idx = self.production_tbl.rowCount()
             self.production_tbl.insertRow(idx)
             values = [
@@ -718,14 +656,12 @@ class ProductionTab(QWidget):
                 str(row["actual"]),
                 str(row["performance_pct"]),
                 str(downtime_total),
-                str(issue_total),
                 downtime_details,
-                issue_details,
                 row["comment"] or "",
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                if col in (8, 9, 10) and value:
+                if col in (7, 8) and value:
                     item.setToolTip(value)
                 self.production_tbl.setItem(idx, col, item)
 
@@ -738,7 +674,7 @@ class ProductionTab(QWidget):
         self.production_detail_view.clear()
 
     def on_production_cell_clicked(self, row, column):
-        if column not in (8, 9, 10):
+        if column not in (7, 8):
             self.clear_production_detail_preview()
             return
 
@@ -785,37 +721,12 @@ class ProductionTab(QWidget):
             details.append(text)
         return total, "; ".join(details)
 
-    def _fetch_issue_summary(self, conn, line, date_str):
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT department, reason, duration_min, comment FROM issues WHERE line=? AND date=? ORDER BY created_at",
-            (line, date_str),
-        )
-        rows = cur.fetchall()
-        total = sum(r["duration_min"] for r in rows)
-        details = []
-        for r in rows:
-            text = f"{r['department']} - {r['reason']} ({r['duration_min']} dk)"
-            if r["comment"]:
-                text += f" Not: {r['comment']}"
-            details.append(text)
-        return total, "; ".join(details)
-
     def update_event_line_options(self):
         """Keep event-related line selections aligned with the production line."""
         current_line = self.cmb_line.currentText()
         if current_line:
             self._sync_line_combo(self.ev_cmb_line, current_line)
             self._sync_line_combo(self.event_filter_line, current_line)
-        self.event_forms_available = True
-
-    def switch_event_type(self, text):
-        is_downtime = text == "Duraklama"
-        if not self.event_forms_available:
-            self.update_event_line_options()
-        self.dt_group.setVisible(is_downtime)
-        self.issue_group.setVisible(not is_downtime)
-        self.btn_save_event.setText("Duraklamayı Kaydet" if is_downtime else "Olayı Kaydet")
 
     def add_split_row(self):
         idx = self.dt_tbl_split.rowCount()
@@ -829,12 +740,6 @@ class ProductionTab(QWidget):
         row = self.dt_tbl_split.currentRow()
         if row >= 0:
             self.dt_tbl_split.removeRow(row)
-
-    def save_event(self):
-        if self.cmb_type.currentText() == "Duraklama":
-            self.save_downtime()
-        else:
-            self.save_issue()
 
     def save_downtime(self):
         total = self.dt_total.value()
@@ -906,106 +811,45 @@ class ProductionTab(QWidget):
         self.dt_comment.clear()
         QMessageBox.information(self, "Kayıt", "Duraklama kaydedildi")
 
-    def save_issue(self):
-        duration = self.issue_duration.value()
-        if duration <= 0:
-            QMessageBox.warning(self, "Doğrulama", "Süre 0'dan büyük olmalıdır.")
-            return
-
-        line = self.ev_cmb_line.currentText()
-        date_str = self.ev_date.date().toString("yyyy-MM-dd")
-        department = self.issue_department.currentText()
-        reason = self.issue_reason.currentText()
-        comment = self.issue_comment.toPlainText().strip()
-
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO issues(line,date,department,reason,duration_min,comment,created_at) VALUES(?,?,?,?,?,?,?)",
-            (line, date_str, department, reason, duration, comment, datetime.utcnow().isoformat()),
-        )
-        conn.commit()
-        conn.close()
-
-        self.events_report_date.setDate(self.ev_date.date())
-        self.events_summary_start.setDate(self.ev_date.date())
-        self.events_summary_end.setDate(self.ev_date.date())
-        self.refresh_event_table()
-        self.refresh_production_table()
-        self.generate_event_report()
-        self.generate_event_summary()
-
-        self.issue_duration.setValue(30)
-        self.issue_comment.clear()
-        QMessageBox.information(self, "Kayıt", "Olay kaydedildi")
-
     def refresh_event_table(self):
         conn = get_conn()
         cur = conn.cursor()
         line_filter = self.event_filter_line.currentText()
-        type_filter = self.event_filter_type.currentText()
 
         entries = []
         total_dt = 0
-        total_issue = 0
 
-        if type_filter in ("Hepsi", "Duraklama"):
-            sql = "SELECT id,line,date,start_time,total_minutes,comment,created_at FROM downtimes"
-            params = []
-            if line_filter != "Hepsi":
-                sql += " WHERE line=?"
-                params.append(line_filter)
-            sql += " ORDER BY date DESC, created_at DESC LIMIT 50"
-            cur.execute(sql, params)
-            downtimes = cur.fetchall()
-            for dt in downtimes:
-                total_dt += dt["total_minutes"]
-                splits = conn.execute(
-                    "SELECT department,reason,minutes FROM downtime_splits WHERE downtime_id=?",
-                    (dt["id"],),
-                ).fetchall()
-                split_text = "; ".join(
-                    f"{sp['department']} - {sp['reason']} ({sp['minutes']} dk)" for sp in splits
-                )
-                entries.append([
-                    "Duraklama",
-                    str(dt["id"]),
-                    dt["line"],
-                    dt["date"],
-                    dt["start_time"],
-                    str(dt["total_minutes"]),
-                    split_text,
-                    dt["comment"] or "",
-                    dt["created_at"],
-                ])
-
-        if type_filter in ("Hepsi", "Olay/Issue"):
-            sql = "SELECT id,line,date,department,reason,duration_min,comment,created_at FROM issues"
-            params = []
-            if line_filter != "Hepsi":
-                sql += " WHERE line=?"
-                params.append(line_filter)
-            sql += " ORDER BY date DESC, created_at DESC LIMIT 50"
-            cur.execute(sql, params)
-            issues = cur.fetchall()
-            for issue in issues:
-                total_issue += issue["duration_min"]
-                entries.append([
-                    "Olay/Issue",
-                    str(issue["id"]),
-                    issue["line"],
-                    issue["date"],
-                    "-",
-                    str(issue["duration_min"]),
-                    f"{issue['department']} - {issue['reason']}",
-                    issue["comment"] or "",
-                    issue["created_at"],
-                ])
+        sql = "SELECT id,line,date,start_time,total_minutes,comment,created_at FROM downtimes"
+        params = []
+        if line_filter != "Hepsi":
+            sql += " WHERE line=?"
+            params.append(line_filter)
+        sql += " ORDER BY date DESC, created_at DESC LIMIT 50"
+        cur.execute(sql, params)
+        downtimes = cur.fetchall()
+        for dt in downtimes:
+            total_dt += dt["total_minutes"]
+            splits = conn.execute(
+                "SELECT department,reason,minutes FROM downtime_splits WHERE downtime_id=?",
+                (dt["id"],),
+            ).fetchall()
+            split_text = "; ".join(
+                f"{sp['department']} - {sp['reason']} ({sp['minutes']} dk)" for sp in splits
+            )
+            entries.append([
+                str(dt["id"]),
+                dt["line"],
+                dt["date"],
+                dt["start_time"],
+                str(dt["total_minutes"]),
+                split_text,
+                dt["comment"] or "",
+                dt["created_at"],
+            ])
 
         conn.close()
 
         headers = [
-            "Tür",
             "id",
             "Bant",
             "Tarih",
@@ -1029,13 +873,8 @@ class ProductionTab(QWidget):
                 self.events_tbl.setItem(idx, col, item)
 
         self.events_tbl.resizeRowsToContents()
-        summary_parts = []
-        if type_filter in ("Hepsi", "Duraklama"):
-            summary_parts.append(f"Duraklama: {total_dt} dk")
-        if type_filter in ("Hepsi", "Olay/Issue"):
-            summary_parts.append(f"Olay: {total_issue} dk")
-        if summary_parts:
-            self.events_lbl_summary.setText("Gösterilen süreler → " + ", ".join(summary_parts))
+        if entries:
+            self.events_lbl_summary.setText(f"Gösterilen duraklama süresi → {total_dt} dk")
         else:
             self.events_lbl_summary.setText("")
 
@@ -1044,11 +883,6 @@ class ProductionTab(QWidget):
         line_filter = (
             self.event_filter_line.currentText() if self.event_filter_line else "Hepsi"
         )
-        type_filter = (
-            self.event_filter_type.currentText() if self.event_filter_type else "Hepsi"
-        )
-        include_downtime = type_filter in ("Hepsi", "Duraklama")
-        include_issue = type_filter in ("Hepsi", "Olay/Issue")
 
         conn = get_conn()
         cur = conn.cursor()
@@ -1064,31 +898,14 @@ class ProductionTab(QWidget):
         cur.execute(prod_sql, prod_params)
         productions = cur.fetchall()
 
-        downtimes = []
-        if include_downtime:
-            dt_sql = (
-                "SELECT id,line,start_time,total_minutes,comment FROM downtimes WHERE date=?"
-            )
-            dt_params = [date_str]
-            if line_filter != "Hepsi":
-                dt_sql += " AND line=?"
-                dt_params.append(line_filter)
-            dt_sql += " ORDER BY line"
-            cur.execute(dt_sql, dt_params)
-            downtimes = cur.fetchall()
-
-        issues = []
-        if include_issue:
-            issue_sql = (
-                "SELECT id,line,department,reason,duration_min,comment FROM issues WHERE date=?"
-            )
-            issue_params = [date_str]
-            if line_filter != "Hepsi":
-                issue_sql += " AND line=?"
-                issue_params.append(line_filter)
-            issue_sql += " ORDER BY line"
-            cur.execute(issue_sql, issue_params)
-            issues = cur.fetchall()
+        dt_sql = "SELECT id,line,start_time,total_minutes,comment FROM downtimes WHERE date=?"
+        dt_params = [date_str]
+        if line_filter != "Hepsi":
+            dt_sql += " AND line=?"
+            dt_params.append(line_filter)
+        dt_sql += " ORDER BY line"
+        cur.execute(dt_sql, dt_params)
+        downtimes = cur.fetchall()
 
         splits_cache = {}
         for dt in downtimes:
@@ -1109,19 +926,15 @@ class ProductionTab(QWidget):
         lines = sorted(
             {row["line"] for row in productions}
             | {row["line"] for row in downtimes}
-            | {row["line"] for row in issues}
         )
         report_lines = [f"Rapor Tarihi: {date_str}", ""]
 
         total_dt = sum(dt["total_minutes"] for dt in downtimes)
-        total_issue = sum(issue["duration_min"] for issue in issues)
         performances = [row["performance_pct"] for row in productions]
         if lines:
             summary_parts = []
-            if include_downtime:
+            if downtimes:
                 summary_parts.append(f"Duraklama: {total_dt} dk")
-            if include_issue:
-                summary_parts.append(f"Olay: {total_issue} dk")
             if summary_parts:
                 report_lines.append(
                     "Genel Süreler → " + ", ".join(summary_parts)
@@ -1131,7 +944,7 @@ class ProductionTab(QWidget):
                 report_lines.append(f"Ortalama Performans: %{avg_perf}")
             report_lines.append("")
         else:
-            if line_filter != "Hepsi" or type_filter != "Hepsi":
+            if line_filter != "Hepsi":
                 report_lines.append("Seçilen filtrelere uygun kayıt bulunamadı.")
             else:
                 report_lines.append("Seçilen tarihte kayıt bulunamadı.")
@@ -1140,10 +953,6 @@ class ProductionTab(QWidget):
         dt_by_line = {}
         for dt in downtimes:
             dt_by_line.setdefault(dt["line"], []).append(dt)
-        issue_by_line = {}
-        for issue in issues:
-            issue_by_line.setdefault(issue["line"], []).append(issue)
-
         for line in lines:
             report_lines.append(f"{line}:")
             prod = prod_by_line.get(line)
@@ -1155,49 +964,32 @@ class ProductionTab(QWidget):
             else:
                 report_lines.append("  Üretim kaydı bulunmuyor.")
 
-            if include_downtime:
-                line_dts = dt_by_line.get(line, [])
-                if line_dts:
-                    report_lines.append("  Duraklamalar:")
-                    total_line_dt = 0
-                    for dt in line_dts:
-                        entry = f"    - Başlangıç: {dt['start_time']} | Süre: {dt['total_minutes']} dk"
-                        if dt["comment"]:
-                            entry += f" | Not: {dt['comment']}"
-                        report_lines.append(entry)
-                        total_line_dt += dt["total_minutes"]
-                        details = splits_cache.get(dt["id"], [])
-                        if details:
-                            report_lines.append("      Dağılım: " + "; ".join(details))
-                    report_lines.append(f"  Toplam Duraklama: {total_line_dt} dk")
-                else:
-                    report_lines.append("  Duraklama kaydı yok.")
-
-            if include_issue:
-                line_issues = issue_by_line.get(line, [])
-                if line_issues:
-                    report_lines.append("  Olaylar:")
-                    total_line_issue = 0
-                    for issue in line_issues:
-                        entry = (
-                            f"    - Departman: {issue['department']} | Neden: {issue['reason']} | Süre: {issue['duration_min']} dk"
-                        )
-                        if issue["comment"]:
-                            entry += f" | Not: {issue['comment']}"
-                        report_lines.append(entry)
-                        total_line_issue += issue["duration_min"]
-                    report_lines.append(f"  Toplam Olay Süresi: {total_line_issue} dk")
-                else:
-                    report_lines.append("  Olay kaydı yok.")
+            line_dts = dt_by_line.get(line, [])
+            if line_dts:
+                report_lines.append("  Duraklamalar:")
+                total_line_dt = 0
+                for dt in line_dts:
+                    entry = f"    - Başlangıç: {dt['start_time']} | Süre: {dt['total_minutes']} dk"
+                    if dt["comment"]:
+                        entry += f" | Not: {dt['comment']}"
+                    report_lines.append(entry)
+                    total_line_dt += dt["total_minutes"]
+                    details = splits_cache.get(dt["id"], [])
+                    if details:
+                        report_lines.append("      Dağılım: " + "; ".join(details))
+                report_lines.append(f"  Toplam Duraklama: {total_line_dt} dk")
+            else:
+                report_lines.append("  Duraklama kaydı yok.")
 
             report_lines.append("")
 
         if not lines:
-            message = "Üretim, duraklama veya olay kaydı bulunamadı."
-            if line_filter != "Hepsi" or type_filter != "Hepsi":
+            message = "Üretim veya duraklama kaydı bulunamadı."
+            if line_filter != "Hepsi":
                 message = "Seçilen filtrelere uygun kayıt bulunamadı."
             report_lines = [
                 f"Rapor Tarihi: {date_str}",
+                "",
                 message,
             ]
 
@@ -1225,49 +1017,24 @@ class ProductionTab(QWidget):
         )
         dt_rows = cur.fetchall()
 
-        cur.execute(
-            """
-            SELECT department, reason, SUM(duration_min) AS total
-            FROM issues
-            WHERE date BETWEEN ? AND ?
-            GROUP BY department, reason
-            ORDER BY total DESC
-            """,
-            (start_date, end_date),
-        )
-        issue_rows = cur.fetchall()
         conn.close()
 
         total_dt = sum(row["total"] for row in dt_rows)
-        total_issue = sum(row["total"] for row in issue_rows)
 
-        if not dt_rows and not issue_rows:
-            self.events_txt_summary.setPlainText("Seçilen aralıkta kayıt bulunamadı.")
+        if not dt_rows:
+            self.events_txt_summary.setPlainText("Seçilen aralıkta duraklama kaydı bulunamadı.")
             return
 
         lines = [
             f"Tarih Aralığı: {start_date} - {end_date}",
-            f"Toplam Süre: {total_dt + total_issue} dk (Duraklama: {total_dt} dk, Olay: {total_issue} dk)",
+            f"Toplam Duraklama Süresi: {total_dt} dk",
             "",
+            "Duraklama Dağılımı:",
         ]
 
-        if dt_rows:
-            lines.append("Duraklama Dağılımı:")
-            for row in dt_rows:
-                share = 0 if total_dt == 0 else round((row["total"] / total_dt) * 100, 1)
-                lines.append(f"- {row['department']} / {row['reason']}: {row['total']} dk (%{share})")
-        else:
-            lines.append("Duraklama dağılımı bulunamadı.")
-
-        lines.append("")
-
-        if issue_rows:
-            lines.append("Olay/Issue Dağılımı:")
-            for row in issue_rows:
-                share = 0 if total_issue == 0 else round((row["total"] / total_issue) * 100, 1)
-                lines.append(f"- {row['department']} / {row['reason']}: {row['total']} dk (%{share})")
-        else:
-            lines.append("Olay dağılımı bulunamadı.")
+        for row in dt_rows:
+            share = 0 if total_dt == 0 else round((row["total"] / total_dt) * 100, 1)
+            lines.append(f"- {row['department']} / {row['reason']}: {row['total']} dk (%{share})")
 
         self.events_txt_summary.setPlainText("\n".join(lines))
 
@@ -1288,7 +1055,7 @@ class HistoryTab(QWidget):
         # Basit filtreler: Bant ve kayıt türü
         row = QHBoxLayout()
         self.cmb_line = QComboBox(); self.cmb_line.addItem("Hepsi"); self.cmb_line.addItems(LINES)
-        self.cmb_type = QComboBox(); self.cmb_type.addItems(["Üretim","Duraklama","Olay/Issue"])
+        self.cmb_type = QComboBox(); self.cmb_type.addItems(["Üretim","Duraklama"])
         btn_refresh = QPushButton("Yenile"); btn_refresh.clicked.connect(self.refresh)
         row.addWidget(QLabel("Bant:")); row.addWidget(self.cmb_line)
         row.addWidget(QLabel("Tür:")); row.addWidget(self.cmb_type)
@@ -1311,7 +1078,7 @@ class HistoryTab(QWidget):
             sql = "SELECT id,line,date,start_time,total_minutes,comment,created_at FROM downtimes"
             order_clause = " ORDER BY id DESC LIMIT 100"
         else:
-            sql = "SELECT id,line,date,department,reason,duration_min,comment,created_at FROM issues"
+            sql = "SELECT id,line,date,start_time,total_minutes,comment,created_at FROM downtimes"
             order_clause = " ORDER BY id DESC LIMIT 100"
 
         params = []
@@ -1330,7 +1097,7 @@ class HistoryTab(QWidget):
             elif typ == "Duraklama":
                 headers = ["id","line","date","start_time","total_minutes","comment","created_at"]
             else:
-                headers = ["id","line","date","department","reason","duration_min","comment","created_at"]
+                headers = ["id","line","date","start_time","total_minutes","comment","created_at"]
         self.tbl.setColumnCount(len(headers))
         self.tbl.setHorizontalHeaderLabels(headers)
         self.tbl.setRowCount(0)
@@ -1350,7 +1117,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Fabrika İzleme • Desktop (PySide6)")
         self.resize(1100, 700)
         tabs = QTabWidget()
-        tabs.addTab(ProductionTab(), "Üretim & Olaylar")
+        tabs.addTab(ProductionTab(), "Üretim & Duraklamalar")
         tabs.addTab(HistoryTab(), "Geçmiş")
         self.setCentralWidget(tabs)
 
