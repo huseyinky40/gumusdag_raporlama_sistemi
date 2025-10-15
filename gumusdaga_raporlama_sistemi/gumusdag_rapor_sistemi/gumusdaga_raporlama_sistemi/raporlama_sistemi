@@ -222,6 +222,49 @@ class ProductionTab(QWidget):
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(16)
 
+        production_group = QGroupBox("Günlük Üretim ve Performans")
+        prod_layout = QVBoxLayout(production_group)
+        prod_layout.setSpacing(12)
+        prod_layout.setContentsMargins(12, 12, 12, 12)
+
+        form = QHBoxLayout()
+        form.setSpacing(12)
+        self.cmb_line = QComboBox()
+        self.cmb_line.addItems(LINES)
+        self.cmb_line.currentTextChanged.connect(self.on_line_changed)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDate(QDate.currentDate())
+        self.spn_expected = QSpinBox()
+        self.spn_expected.setRange(0, 10_000)
+        self.spn_expected.setValue(100)
+        self.spn_actual = QSpinBox()
+        self.spn_actual.setRange(0, 10_000)
+        self.spn_actual.setValue(90)
+        form.addWidget(QLabel("Bant:"))
+        form.addWidget(self.cmb_line)
+        form.addWidget(QLabel("Tarih:"))
+        form.addWidget(self.date_edit)
+        form.addWidget(QLabel("Beklenen:"))
+        form.addWidget(self.spn_expected)
+        form.addWidget(QLabel("Gerçekleşen:"))
+        form.addWidget(self.spn_actual)
+        prod_layout.addLayout(form)
+
+        self.txt_comment = QLineEdit()
+        self.txt_comment.setPlaceholderText("Yorum (opsiyonel)")
+        prod_layout.addWidget(self.txt_comment)
+
+        btn_save = QPushButton("Üretimi Kaydet")
+        btn_save.clicked.connect(self.save_production_record)
+        prod_layout.addWidget(btn_save)
+
+        self.production_tbl = QTableWidget(0, 0)
+        self.production_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        prod_layout.addWidget(self.production_tbl)
+
+        main_layout.addWidget(production_group)
+
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         main_layout.addWidget(scroll_area, 1)
@@ -280,13 +323,13 @@ class ProductionTab(QWidget):
         general_row.setSpacing(12)
         self.cmb_type = QComboBox()
         self.cmb_type.addItems(["Duraklama", "Olay/Issue"])
-        self.cmb_type.currentTextChanged.connect(self.on_event_type_changed)
+        self.cmb_type.currentTextChanged.connect(self.switch_event_type)
         self.ev_cmb_line = QComboBox()
+        self.ev_cmb_line.addItems(LINES)
         self.ev_cmb_line.currentTextChanged.connect(self.on_event_line_changed)
         self.ev_date = QDateEdit()
         self.ev_date.setCalendarPopup(True)
         self.ev_date.setDate(QDate.currentDate())
-        self.ev_date.dateChanged.connect(self.on_event_date_changed)
         general_row.addWidget(QLabel("Tür:"))
         general_row.addWidget(self.cmb_type)
         general_row.addWidget(QLabel("Bant (eşlenik):"))
@@ -295,10 +338,6 @@ class ProductionTab(QWidget):
         general_row.addWidget(self.ev_date)
         general_row.addStretch()
         content_layout.addLayout(general_row)
-
-        self.event_production_info = QLabel("")
-        self.event_production_info.setWordWrap(True)
-        content_layout.addWidget(self.event_production_info)
 
         self.dt_group = QGroupBox("Duraklama Detayları")
         dt_layout = QVBoxLayout(self.dt_group)
@@ -457,7 +496,7 @@ class ProductionTab(QWidget):
 
         self.event_forms_available = False
         self.update_event_line_options()
-        self.on_event_type_changed(self.cmb_type.currentText())
+        self.switch_event_type(self.cmb_type.currentText())
         self.add_split_row()
         self.refresh_production_table()
         self.refresh_event_table()
@@ -479,7 +518,6 @@ class ProductionTab(QWidget):
         self.refresh_production_table()
         self.refresh_event_table()
         self.generate_event_report()
-        self.update_event_production_info()
 
     def on_event_line_changed(self, text):
         if self.cmb_line.currentText() != text:
@@ -487,99 +525,6 @@ class ProductionTab(QWidget):
             self.cmb_line.setCurrentText(text)
             self.cmb_line.blockSignals(False)
         self.on_line_changed(text)
-
-    def on_event_date_changed(self):
-        self.update_event_line_options()
-        self.update_event_production_info()
-
-    def update_event_line_options(self):
-        date_str = self.ev_date.date().toString("yyyy-MM-dd")
-        conn = get_conn()
-        rows = conn.execute(
-            "SELECT DISTINCT line FROM productions WHERE date=?",
-            (date_str,),
-        ).fetchall()
-        conn.close()
-
-        available_lines = sorted(row["line"] for row in rows)
-        current_line = self.ev_cmb_line.currentText()
-
-        if available_lines:
-            self.event_forms_available = True
-            selected_line = current_line if current_line in available_lines else available_lines[0]
-            self.ev_cmb_line.blockSignals(True)
-            self.ev_cmb_line.clear()
-            self.ev_cmb_line.addItems(available_lines)
-            idx = self.ev_cmb_line.findText(selected_line)
-            if idx >= 0:
-                self.ev_cmb_line.setCurrentIndex(idx)
-            self.ev_cmb_line.blockSignals(False)
-            if selected_line != current_line:
-                self.on_event_line_changed(self.ev_cmb_line.currentText())
-            else:
-                self.update_event_production_info()
-        else:
-            self.ev_cmb_line.blockSignals(True)
-            self.ev_cmb_line.clear()
-            self.ev_cmb_line.blockSignals(False)
-            self.event_forms_available = False
-            self.event_production_info.setText(
-                "Seçili tarihte üretim kaydı yok. Önce üretim kaydı ekleyin."
-            )
-        self._apply_event_form_state()
-
-    def update_event_production_info(self):
-        if self.ev_cmb_line.count() == 0:
-            self.event_production_info.setText(
-                "Seçili tarihte üretim kaydı yok. Önce üretim kaydı ekleyin."
-            )
-            return
-
-        line = self.ev_cmb_line.currentText()
-        if not line:
-            self.event_production_info.setText(
-                "Seçili tarihte üretim kaydı yok. Önce üretim kaydı ekleyin."
-            )
-            return
-
-        date_str = self.ev_date.date().toString("yyyy-MM-dd")
-        conn = get_conn()
-        row = conn.execute(
-            """
-            SELECT expected, actual, performance_pct, comment
-            FROM productions
-            WHERE line=? AND date=?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (line, date_str),
-        ).fetchone()
-        conn.close()
-
-        if row:
-            info = (
-                f"Seçilen bant için üretim → Beklenen: {row['expected']}, "
-                f"Gerçekleşen: {row['actual']}, Performans: %{row['performance_pct']}"
-            )
-            if row["comment"]:
-                info += f" | Not: {row['comment']}"
-            self.event_production_info.setText(info)
-        else:
-            self.event_production_info.setText(
-                "Seçilen bant ve tarihte üretim kaydı bulunmuyor."
-            )
-
-    def _apply_event_form_state(self):
-        is_downtime = self.cmb_type.currentText() == "Duraklama"
-        has_lines = getattr(self, "event_forms_available", False)
-
-        self.dt_group.setVisible(is_downtime)
-        self.issue_group.setVisible(not is_downtime)
-
-        self.ev_cmb_line.setEnabled(has_lines)
-        self.btn_save_event.setEnabled(has_lines)
-        self.dt_group.setEnabled(has_lines and is_downtime)
-        self.issue_group.setEnabled(has_lines and not is_downtime)
 
     def save_production_record(self):
         line = self.cmb_line.currentText()
@@ -598,7 +543,6 @@ class ProductionTab(QWidget):
         conn.commit()
         conn.close()
         self.refresh_production_table()
-        self.update_event_line_options()
         if self.events_report_date.date() == self.date_edit.date():
             self.generate_event_report()
         QMessageBox.information(self, "Kayıt", "Üretim kaydı eklendi")
@@ -698,15 +642,9 @@ class ProductionTab(QWidget):
             details.append(text)
         return total, "; ".join(details)
 
-    def on_event_type_changed(self, typ):
-        if not typ:
-            typ = self.cmb_type.currentText()
-        self.btn_save_event.setText("Duraklamayı Kaydet" if typ == "Duraklama" else "Olayı Kaydet")
-        self._apply_event_form_state()
-
-    # Backwards compatibility for any external references
-    def switch_event_type(self, typ):
-        self.on_event_type_changed(typ)
+        self.dt_group.setVisible(is_downtime)
+        self.issue_group.setVisible(not is_downtime)
+        self.btn_save_event.setText("Duraklamayı Kaydet" if is_downtime else "Olayı Kaydet")
 
     def add_split_row(self):
         idx = self.dt_tbl_split.rowCount()
