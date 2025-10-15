@@ -170,6 +170,9 @@ def init_db():
         """
     )
     cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_productions_line_date ON productions(line, date)"
+    )
+    cur.execute(
         """
         CREATE TABLE IF NOT EXISTS downtimes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,6 +184,9 @@ def init_db():
             created_at TEXT NOT NULL
         )
         """
+    )
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_downtimes_line_date ON downtimes(line, date)"
     )
     cur.execute(
         """
@@ -516,6 +522,18 @@ class ProductionTab(QWidget):
 
         conn = get_conn()
         cur = conn.cursor()
+        existing = cur.execute(
+            "SELECT id FROM productions WHERE line=? AND date=?",
+            (line, date_str),
+        ).fetchone()
+        if existing:
+            conn.close()
+            QMessageBox.warning(
+                self,
+                "Kayıt Mevcut",
+                "Seçilen bant ve tarih için zaten bir üretim kaydı bulunuyor.",
+            )
+            return
         cur.execute(
             "INSERT INTO productions(line,date,expected,actual,performance_pct,comment,created_at) VALUES(?,?,?,?,?,?,?)",
             (line, date_str, expected, actual, perf, comment, datetime.utcnow().isoformat()),
@@ -717,6 +735,18 @@ class ProductionTab(QWidget):
 
         conn = get_conn()
         cur = conn.cursor()
+        existing = cur.execute(
+            "SELECT id FROM downtimes WHERE line=? AND date=?",
+            (line, date_str),
+        ).fetchone()
+        if existing:
+            conn.close()
+            QMessageBox.warning(
+                self,
+                "Kayıt Mevcut",
+                "Seçilen bant ve tarih için zaten bir duraklama kaydı bulunuyor.",
+            )
+            return
         cur.execute(
             "INSERT INTO downtimes(line,date,start_time,total_minutes,comment,created_at) VALUES(?,?,?,?,?,?)",
             (line, date_str, start, total, comment, datetime.utcnow().isoformat()),
