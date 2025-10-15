@@ -1186,14 +1186,22 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Fabrika İzleme • Desktop (PySide6)")
         self.resize(1100, 700)
+        self.production_tab = ProductionTab()
+        self.history_tab = HistoryTab()
+
         tabs = QTabWidget()
-        tabs.addTab(ProductionTab(), "Üretim & Olaylar")
-        tabs.addTab(HistoryTab(), "Geçmiş")
+        tabs.addTab(self.production_tab, "Üretim & Olaylar")
+        tabs.addTab(self.history_tab, "Geçmiş")
         self.setCentralWidget(tabs)
 
         # Menü → Çıkış ve Hakkında
         menu = self.menuBar().addMenu("Dosya")
-        act_exit = QAction("Çıkış", self); act_exit.triggered.connect(self.close)
+        act_clear = QAction("Verileri Temizle", self)
+        act_clear.triggered.connect(self.clear_database)
+        act_exit = QAction("Çıkış", self)
+        act_exit.triggered.connect(self.close)
+        menu.addAction(act_clear)
+        menu.addSeparator()
         menu.addAction(act_exit)
         helpm = self.menuBar().addMenu("Yardım")
         about = QAction("Hakkında", self); about.triggered.connect(self.show_about)
@@ -1201,6 +1209,36 @@ class MainWindow(QMainWindow):
 
     def show_about(self):
         QMessageBox.information(self, "Hakkında", "Fabrika İzleme Desktop MVP\nPySide6 + SQLite\n© 2025")
+
+    def clear_database(self):
+        reply = QMessageBox.question(
+            self,
+            "Verileri Temizle",
+            "Tüm üretim, duraklama ve olay kayıtları silinecek. Emin misiniz?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        conn = get_conn()
+        try:
+            conn.execute("DELETE FROM downtime_splits")
+            conn.execute("DELETE FROM downtimes")
+            conn.execute("DELETE FROM issues")
+            conn.execute("DELETE FROM productions")
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.production_tab.refresh_production_table()
+        self.production_tab.refresh_event_table()
+        self.production_tab.generate_event_report()
+        self.production_tab.generate_event_summary()
+        self.history_tab.refresh()
+
+        QMessageBox.information(self, "Veriler Silindi", "Tüm kayıtlar temizlendi.")
 
 
 def main():
