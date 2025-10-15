@@ -582,6 +582,7 @@ class ProductionTab(QWidget):
             return
 
         id_item = self.production_tbl.item(row, 0)
+        line_item = self.production_tbl.item(row, 1)
         date_item = self.production_tbl.item(row, 2)
         record_id_text = id_item.text().strip() if id_item else ""
         if not record_id_text:
@@ -612,12 +613,43 @@ class ProductionTab(QWidget):
         if confirm != QMessageBox.Yes:
             return
 
+        selected_line = line_item.text().strip() if line_item else ""
+        selected_date = date_item.text().strip() if date_item else ""
+
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("DELETE FROM productions WHERE id=?", (record_id,))
-        deleted = cur.rowcount
-        conn.commit()
-        conn.close()
+        deleted = 0
+
+        try:
+            cur.execute("DELETE FROM productions WHERE id=?", (record_id,))
+            deleted = cur.rowcount
+
+            if deleted and selected_line and selected_date:
+                downtime_ids = [
+                    row["id"]
+                    for row in cur.execute(
+                        "SELECT id FROM downtimes WHERE line=? AND date=?",
+                        (selected_line, selected_date),
+                    ).fetchall()
+                ]
+                if downtime_ids:
+                    cur.executemany(
+                        "DELETE FROM downtime_splits WHERE downtime_id=?",
+                        [(downtime_id,) for downtime_id in downtime_ids],
+                    )
+                    cur.execute(
+                        "DELETE FROM downtimes WHERE id IN (%s)" % ",".join(["?"] * len(downtime_ids)),
+                        downtime_ids,
+                    )
+
+                cur.execute(
+                    "DELETE FROM issues WHERE line=? AND date=?",
+                    (selected_line, selected_date),
+                )
+
+            conn.commit()
+        finally:
+            conn.close()
 
         if not deleted:
             QMessageBox.warning(
@@ -627,15 +659,24 @@ class ProductionTab(QWidget):
             )
             return
 
-        selected_date = date_item.text().strip() if date_item else ""
         self.refresh_production_table()
+        self.refresh_event_table()
 
         if selected_date:
             report_date = self.events_report_date.date().toString("yyyy-MM-dd")
             if selected_date == report_date:
                 self.generate_event_report()
 
-        QMessageBox.information(self, "Silindi", "Üretim kaydı silindi.")
+            summary_start = self.events_summary_start.date().toString("yyyy-MM-dd")
+            summary_end = self.events_summary_end.date().toString("yyyy-MM-dd")
+            if summary_start <= selected_date <= summary_end:
+                self.generate_event_summary()
+
+        QMessageBox.information(
+            self,
+            "Silindi",
+            "Üretim kaydı ve ilgili duraklama/olay kayıtları silindi.",
+        )
 
     def refresh_production_table(self):
         line = self.cmb_line.currentText()
