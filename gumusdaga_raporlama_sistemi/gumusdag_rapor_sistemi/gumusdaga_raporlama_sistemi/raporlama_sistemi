@@ -642,6 +642,18 @@ class ProductionTab(QWidget):
             details.append(text)
         return total, "; ".join(details)
 
+    def update_event_line_options(self):
+        """Keep event-related line selections aligned with the production line."""
+        current_line = self.cmb_line.currentText()
+        if current_line:
+            self._sync_line_combo(self.ev_cmb_line, current_line)
+            self._sync_line_combo(self.event_filter_line, current_line)
+        self.event_forms_available = True
+
+    def switch_event_type(self, text):
+        is_downtime = text == "Duraklama"
+        if not self.event_forms_available:
+            self.update_event_line_options()
         self.dt_group.setVisible(is_downtime)
         self.issue_group.setVisible(not is_downtime)
         self.btn_save_event.setText("Duraklamayı Kaydet" if is_downtime else "Olayı Kaydet")
