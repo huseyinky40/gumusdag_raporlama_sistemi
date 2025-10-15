@@ -65,6 +65,20 @@ def normalize_reason_department(reason_value, department_value):
     return reason_text, department_text, False
 
 
+def remove_duplicate_line_date(conn, table_name):
+    """Keep the latest row per (line, date) pair to satisfy upcoming unique index."""
+    conn.execute(
+        f"""
+        DELETE FROM {table_name}
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM {table_name}
+            GROUP BY line, date
+        )
+        """
+    )
+
+
 def normalize_existing_downtime_splits(conn):
     rows = conn.execute(
         "SELECT id, reason, department FROM downtime_splits"
@@ -169,6 +183,7 @@ def init_db():
         )
         """
     )
+    remove_duplicate_line_date(conn, "productions")
     cur.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_productions_line_date ON productions(line, date)"
     )
@@ -185,6 +200,7 @@ def init_db():
         )
         """
     )
+    remove_duplicate_line_date(conn, "downtimes")
     cur.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_downtimes_line_date ON downtimes(line, date)"
     )
