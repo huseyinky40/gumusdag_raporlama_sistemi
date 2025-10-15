@@ -290,9 +290,19 @@ class ProductionTab(QWidget):
         self.txt_comment.setPlaceholderText("Yorum (opsiyonel)")
         prod_layout.addWidget(self.txt_comment)
 
-        btn_save = QPushButton("Üretimi Kaydet")
-        btn_save.clicked.connect(self.save_production_record)
-        prod_layout.addWidget(btn_save)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+
+        self.btn_save_production = QPushButton("Üretimi Kaydet")
+        self.btn_save_production.clicked.connect(self.save_production_record)
+        button_row.addWidget(self.btn_save_production)
+
+        self.btn_delete_production = QPushButton("Seçilen Üretimi Sil")
+        self.btn_delete_production.clicked.connect(self.delete_selected_production)
+        button_row.addWidget(self.btn_delete_production)
+
+        button_row.addStretch()
+        prod_layout.addLayout(button_row)
 
         self.production_tbl = QTableWidget(0, 0)
         self.production_tbl.setWordWrap(False)
@@ -560,6 +570,72 @@ class ProductionTab(QWidget):
         if self.events_report_date.date() == self.date_edit.date():
             self.generate_event_report()
         QMessageBox.information(self, "Kayıt", "Üretim kaydı eklendi")
+
+    def delete_selected_production(self):
+        row = self.production_tbl.currentRow()
+        if row < 0:
+            QMessageBox.warning(
+                self,
+                "Seçim Yok",
+                "Silmek için listeden bir üretim kaydı seçin.",
+            )
+            return
+
+        id_item = self.production_tbl.item(row, 0)
+        date_item = self.production_tbl.item(row, 2)
+        record_id_text = id_item.text().strip() if id_item else ""
+        if not record_id_text:
+            QMessageBox.warning(
+                self,
+                "Eksik Bilgi",
+                "Seçilen kaydın kimlik bilgisi bulunamadı.",
+            )
+            return
+
+        try:
+            record_id = int(record_id_text)
+        except ValueError:
+            QMessageBox.warning(
+                self,
+                "Geçersiz Kayıt",
+                "Seçilen kaydın kimlik bilgisi geçersiz.",
+            )
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Üretimi Sil",
+            "Seçilen üretim kaydını silmek istediğinize emin misiniz?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM productions WHERE id=?", (record_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        conn.close()
+
+        if not deleted:
+            QMessageBox.warning(
+                self,
+                "Bulunamadı",
+                "Seçilen üretim kaydı veritabanında bulunamadı.",
+            )
+            return
+
+        selected_date = date_item.text().strip() if date_item else ""
+        self.refresh_production_table()
+
+        if selected_date:
+            report_date = self.events_report_date.date().toString("yyyy-MM-dd")
+            if selected_date == report_date:
+                self.generate_event_report()
+
+        QMessageBox.information(self, "Silindi", "Üretim kaydı silindi.")
 
     def refresh_production_table(self):
         line = self.cmb_line.currentText()
