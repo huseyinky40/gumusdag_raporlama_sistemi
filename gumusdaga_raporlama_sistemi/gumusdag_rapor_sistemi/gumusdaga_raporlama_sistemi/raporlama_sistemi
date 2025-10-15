@@ -272,6 +272,9 @@ class ProductionTab(QWidget):
         prod_layout.addWidget(btn_save)
 
         self.production_tbl = QTableWidget(0, 0)
+        self.production_tbl.setWordWrap(False)
+        self.production_tbl.setTextElideMode(Qt.ElideRight)
+        self.production_tbl.verticalHeader().setDefaultSectionSize(44)
         self.production_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         prod_layout.addWidget(self.production_tbl)
 
@@ -551,10 +554,13 @@ class ProductionTab(QWidget):
                 row["comment"] or "",
             ]
             for col, value in enumerate(values):
-                self.production_tbl.setItem(idx, col, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if col in (8, 9, 10) and value:
+                    item.setToolTip(value)
+                self.production_tbl.setItem(idx, col, item)
 
         conn.close()
-        self.production_tbl.resizeRowsToContents()
+        self.production_tbl.viewport().update()
 
     def _fetch_downtime_summary(self, conn, line, date_str):
         cur = conn.cursor()
