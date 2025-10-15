@@ -214,6 +214,7 @@ def init_db():
 
 
 # --------------------- UI Widgets -------------------------
+
 class ProductionTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -222,52 +223,9 @@ class ProductionTab(QWidget):
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(16)
 
-        production_group = QGroupBox("Günlük Üretim ve Performans")
-        prod_layout = QVBoxLayout(production_group)
-        prod_layout.setSpacing(12)
-        prod_layout.setContentsMargins(12, 12, 12, 12)
-
-        form = QHBoxLayout()
-        form.setSpacing(12)
-        self.cmb_line = QComboBox()
-        self.cmb_line.addItems(LINES)
-        self.cmb_line.currentTextChanged.connect(self.on_line_changed)
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDate(QDate.currentDate())
-        self.spn_expected = QSpinBox()
-        self.spn_expected.setRange(0, 10_000)
-        self.spn_expected.setValue(100)
-        self.spn_actual = QSpinBox()
-        self.spn_actual.setRange(0, 10_000)
-        self.spn_actual.setValue(90)
-        form.addWidget(QLabel("Bant:"))
-        form.addWidget(self.cmb_line)
-        form.addWidget(QLabel("Tarih:"))
-        form.addWidget(self.date_edit)
-        form.addWidget(QLabel("Beklenen:"))
-        form.addWidget(self.spn_expected)
-        form.addWidget(QLabel("Gerçekleşen:"))
-        form.addWidget(self.spn_actual)
-        prod_layout.addLayout(form)
-
-        self.txt_comment = QLineEdit()
-        self.txt_comment.setPlaceholderText("Yorum (opsiyonel)")
-        prod_layout.addWidget(self.txt_comment)
-
-        btn_save = QPushButton("Üretimi Kaydet")
-        btn_save.clicked.connect(self.save_production_record)
-        prod_layout.addWidget(btn_save)
-
-        self.production_tbl = QTableWidget(0, 0)
-        self.production_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        prod_layout.addWidget(self.production_tbl)
-
-        main_layout.addWidget(production_group)
-
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        main_layout.addWidget(scroll_area, 1)
+        main_layout.addWidget(scroll_area)
 
         scroll_content = QWidget()
         scroll_area.setWidget(scroll_content)
