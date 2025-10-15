@@ -1000,26 +1000,54 @@ class ProductionTab(QWidget):
 
     def generate_event_report(self):
         date_str = self.events_report_date.date().toString("yyyy-MM-dd")
+        line_filter = (
+            self.event_filter_line.currentText() if self.event_filter_line else "Hepsi"
+        )
+        type_filter = (
+            self.event_filter_type.currentText() if self.event_filter_type else "Hepsi"
+        )
+        include_downtime = type_filter in ("Hepsi", "Duraklama")
+        include_issue = type_filter in ("Hepsi", "Olay/Issue")
+
         conn = get_conn()
         cur = conn.cursor()
 
-        cur.execute(
-            "SELECT line, expected, actual, performance_pct, comment FROM productions WHERE date=? ORDER BY line",
-            (date_str,),
+        prod_sql = (
+            "SELECT line, expected, actual, performance_pct, comment FROM productions WHERE date=?"
         )
+        prod_params = [date_str]
+        if line_filter != "Hepsi":
+            prod_sql += " AND line=?"
+            prod_params.append(line_filter)
+        prod_sql += " ORDER BY line"
+        cur.execute(prod_sql, prod_params)
         productions = cur.fetchall()
 
-        cur.execute(
-            "SELECT id,line,start_time,total_minutes,comment FROM downtimes WHERE date=? ORDER BY line",
-            (date_str,),
-        )
-        downtimes = cur.fetchall()
+        downtimes = []
+        if include_downtime:
+            dt_sql = (
+                "SELECT id,line,start_time,total_minutes,comment FROM downtimes WHERE date=?"
+            )
+            dt_params = [date_str]
+            if line_filter != "Hepsi":
+                dt_sql += " AND line=?"
+                dt_params.append(line_filter)
+            dt_sql += " ORDER BY line"
+            cur.execute(dt_sql, dt_params)
+            downtimes = cur.fetchall()
 
-        cur.execute(
-            "SELECT id,line,department,reason,duration_min,comment FROM issues WHERE date=? ORDER BY line",
-            (date_str,),
-        )
-        issues = cur.fetchall()
+        issues = []
+        if include_issue:
+            issue_sql = (
+                "SELECT id,line,department,reason,duration_min,comment FROM issues WHERE date=?"
+            )
+            issue_params = [date_str]
+            if line_filter != "Hepsi":
+                issue_sql += " AND line=?"
+                issue_params.append(line_filter)
+            issue_sql += " ORDER BY line"
+            cur.execute(issue_sql, issue_params)
+            issues = cur.fetchall()
 
         splits_cache = {}
         for dt in downtimes:
@@ -1037,22 +1065,35 @@ class ProductionTab(QWidget):
 
         conn.close()
 
-        lines = sorted({row["line"] for row in productions} | {row["line"] for row in downtimes} | {row["line"] for row in issues})
+        lines = sorted(
+            {row["line"] for row in productions}
+            | {row["line"] for row in downtimes}
+            | {row["line"] for row in issues}
+        )
         report_lines = [f"Rapor Tarihi: {date_str}", ""]
 
         total_dt = sum(dt["total_minutes"] for dt in downtimes)
         total_issue = sum(issue["duration_min"] for issue in issues)
         performances = [row["performance_pct"] for row in productions]
         if lines:
-            report_lines.append(
-                f"Genel Süreler → Duraklama: {total_dt} dk, Olay: {total_issue} dk"
-            )
+            summary_parts = []
+            if include_downtime:
+                summary_parts.append(f"Duraklama: {total_dt} dk")
+            if include_issue:
+                summary_parts.append(f"Olay: {total_issue} dk")
+            if summary_parts:
+                report_lines.append(
+                    "Genel Süreler → " + ", ".join(summary_parts)
+                )
             if performances:
                 avg_perf = round(sum(performances) / len(performances), 2)
                 report_lines.append(f"Ortalama Performans: %{avg_perf}")
             report_lines.append("")
         else:
-            report_lines.append("Seçilen tarihte kayıt bulunamadı.")
+            if line_filter != "Hepsi" or type_filter != "Hepsi":
+                report_lines.append("Seçilen filtrelere uygun kayıt bulunamadı.")
+            else:
+                report_lines.append("Seçilen tarihte kayıt bulunamadı.")
 
         prod_by_line = {row["line"]: row for row in productions}
         dt_by_line = {}
@@ -1073,45 +1114,50 @@ class ProductionTab(QWidget):
             else:
                 report_lines.append("  Üretim kaydı bulunmuyor.")
 
-            line_dts = dt_by_line.get(line, [])
-            if line_dts:
-                report_lines.append("  Duraklamalar:")
-                total_line_dt = 0
-                for dt in line_dts:
-                    entry = f"    - Başlangıç: {dt['start_time']} | Süre: {dt['total_minutes']} dk"
-                    if dt["comment"]:
-                        entry += f" | Not: {dt['comment']}"
-                    report_lines.append(entry)
-                    total_line_dt += dt["total_minutes"]
-                    details = splits_cache.get(dt["id"], [])
-                    if details:
-                        report_lines.append("      Dağılım: " + "; ".join(details))
-                report_lines.append(f"  Toplam Duraklama: {total_line_dt} dk")
-            else:
-                report_lines.append("  Duraklama kaydı yok.")
+            if include_downtime:
+                line_dts = dt_by_line.get(line, [])
+                if line_dts:
+                    report_lines.append("  Duraklamalar:")
+                    total_line_dt = 0
+                    for dt in line_dts:
+                        entry = f"    - Başlangıç: {dt['start_time']} | Süre: {dt['total_minutes']} dk"
+                        if dt["comment"]:
+                            entry += f" | Not: {dt['comment']}"
+                        report_lines.append(entry)
+                        total_line_dt += dt["total_minutes"]
+                        details = splits_cache.get(dt["id"], [])
+                        if details:
+                            report_lines.append("      Dağılım: " + "; ".join(details))
+                    report_lines.append(f"  Toplam Duraklama: {total_line_dt} dk")
+                else:
+                    report_lines.append("  Duraklama kaydı yok.")
 
-            line_issues = issue_by_line.get(line, [])
-            if line_issues:
-                report_lines.append("  Olaylar:")
-                total_line_issue = 0
-                for issue in line_issues:
-                    entry = (
-                        f"    - Departman: {issue['department']} | Neden: {issue['reason']} | Süre: {issue['duration_min']} dk"
-                    )
-                    if issue["comment"]:
-                        entry += f" | Not: {issue['comment']}"
-                    report_lines.append(entry)
-                    total_line_issue += issue["duration_min"]
-                report_lines.append(f"  Toplam Olay Süresi: {total_line_issue} dk")
-            else:
-                report_lines.append("  Olay kaydı yok.")
+            if include_issue:
+                line_issues = issue_by_line.get(line, [])
+                if line_issues:
+                    report_lines.append("  Olaylar:")
+                    total_line_issue = 0
+                    for issue in line_issues:
+                        entry = (
+                            f"    - Departman: {issue['department']} | Neden: {issue['reason']} | Süre: {issue['duration_min']} dk"
+                        )
+                        if issue["comment"]:
+                            entry += f" | Not: {issue['comment']}"
+                        report_lines.append(entry)
+                        total_line_issue += issue["duration_min"]
+                    report_lines.append(f"  Toplam Olay Süresi: {total_line_issue} dk")
+                else:
+                    report_lines.append("  Olay kaydı yok.")
 
             report_lines.append("")
 
         if not lines:
+            message = "Üretim, duraklama veya olay kaydı bulunamadı."
+            if line_filter != "Hepsi" or type_filter != "Hepsi":
+                message = "Seçilen filtrelere uygun kayıt bulunamadı."
             report_lines = [
                 f"Rapor Tarihi: {date_str}",
-                "Üretim, duraklama veya olay kaydı bulunamadı.",
+                message,
             ]
 
         self.events_txt_report.setPlainText("\n".join(report_lines))
