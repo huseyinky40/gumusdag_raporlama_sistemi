@@ -340,6 +340,7 @@ class ProductionTab(QWidget):
         row1.setSpacing(12)
         self.dt_start_time = QLineEdit()
         self.dt_start_time.setPlaceholderText("Başlangıç (HH:MM)")
+        self.dt_start_time.setInputMask("00:00;_")
         self.dt_total = QSpinBox()
         self.dt_total.setRange(1, 10_000)
         self.dt_total.setValue(60)
@@ -376,6 +377,9 @@ class ProductionTab(QWidget):
         self.btn_save_event = QPushButton("Duraklamayı Kaydet")
         self.btn_save_event.clicked.connect(self.save_downtime)
         content_layout.addWidget(self.btn_save_event)
+
+        self.dt_start_time.textChanged.connect(self.update_downtime_save_enabled)
+        self.update_downtime_save_enabled()
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(12)
@@ -741,6 +745,11 @@ class ProductionTab(QWidget):
         if row >= 0:
             self.dt_tbl_split.removeRow(row)
 
+    def update_downtime_save_enabled(self):
+        text = self.dt_start_time.text().strip()
+        is_valid = bool(text) and "_" not in text
+        self.btn_save_event.setEnabled(is_valid)
+
     def save_downtime(self):
         total = self.dt_total.value()
         sum_rows = 0
@@ -768,7 +777,10 @@ class ProductionTab(QWidget):
 
         line = self.ev_cmb_line.currentText()
         date_str = self.ev_date.date().toString("yyyy-MM-dd")
-        start = self.dt_start_time.text().strip() or "00:00"
+        start = self.dt_start_time.text().strip()
+        if not start or "_" in start:
+            QMessageBox.warning(self, "Doğrulama", "Lütfen geçerli bir başlangıç saati girin (HH:MM).")
+            return
         comment = self.dt_comment.toPlainText().strip()
 
         conn = get_conn()
