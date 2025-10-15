@@ -276,6 +276,49 @@ class ProductionTab(QWidget):
         content_layout.setContentsMargins(4, 4, 4, 4)
         content_layout.setSpacing(16)
 
+        production_group = QGroupBox("Günlük Üretim ve Performans")
+        prod_layout = QVBoxLayout(production_group)
+        prod_layout.setSpacing(12)
+        prod_layout.setContentsMargins(12, 12, 12, 12)
+
+        form = QHBoxLayout()
+        form.setSpacing(12)
+        self.cmb_line = QComboBox()
+        self.cmb_line.addItems(LINES)
+        self.cmb_line.currentTextChanged.connect(self.on_line_changed)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDate(QDate.currentDate())
+        self.spn_expected = QSpinBox()
+        self.spn_expected.setRange(0, 10_000)
+        self.spn_expected.setValue(100)
+        self.spn_actual = QSpinBox()
+        self.spn_actual.setRange(0, 10_000)
+        self.spn_actual.setValue(90)
+        form.addWidget(QLabel("Bant:"))
+        form.addWidget(self.cmb_line)
+        form.addWidget(QLabel("Tarih:"))
+        form.addWidget(self.date_edit)
+        form.addWidget(QLabel("Beklenen:"))
+        form.addWidget(self.spn_expected)
+        form.addWidget(QLabel("Gerçekleşen:"))
+        form.addWidget(self.spn_actual)
+        prod_layout.addLayout(form)
+
+        self.txt_comment = QLineEdit()
+        self.txt_comment.setPlaceholderText("Yorum (opsiyonel)")
+        prod_layout.addWidget(self.txt_comment)
+
+        btn_save = QPushButton("Üretimi Kaydet")
+        btn_save.clicked.connect(self.save_production_record)
+        prod_layout.addWidget(btn_save)
+
+        self.production_tbl = QTableWidget(0, 0)
+        self.production_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        prod_layout.addWidget(self.production_tbl)
+
+        content_layout.addWidget(production_group)
+
         general_row = QHBoxLayout()
         general_row.setSpacing(12)
         self.cmb_type = QComboBox()
@@ -451,6 +494,8 @@ class ProductionTab(QWidget):
 
         content_layout.addStretch()
 
+        self.event_forms_available = False
+        self.update_event_line_options()
         self.switch_event_type(self.cmb_type.currentText())
         self.add_split_row()
         self.refresh_production_table()
@@ -597,8 +642,6 @@ class ProductionTab(QWidget):
             details.append(text)
         return total, "; ".join(details)
 
-    def switch_event_type(self, typ):
-        is_downtime = typ == "Duraklama"
         self.dt_group.setVisible(is_downtime)
         self.issue_group.setVisible(not is_downtime)
         self.btn_save_event.setText("Duraklamayı Kaydet" if is_downtime else "Olayı Kaydet")
